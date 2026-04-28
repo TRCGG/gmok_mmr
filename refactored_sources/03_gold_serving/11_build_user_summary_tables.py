@@ -1,19 +1,16 @@
 import pandas as pd
 import numpy as np
 
-# ==================================================
-# 1. 유저 이름 파일 로드
-# ==================================================
-user_name_path = r"C:/Users/PC/Desktop/김필준/data/2026 유저_0415.csv"
+from mmr_refactor.config import get_output_dir
+from mmr_refactor.data_loader import load_user_name_dataframe
 
-try:
-    user_name = pd.read_csv(user_name_path, encoding='utf-8', on_bad_lines='skip')
-    print("UTF-8 인코딩으로 데이터 로드에 성공했습니다.")
-except UnicodeDecodeError:
-    user_name = pd.read_csv(user_name_path, encoding='cp949', on_bad_lines='skip')
-    print("CP949 인코딩으로 데이터 로드에 성공했습니다.")
-
-user_name = user_name[['puuid', 'riot_name']].drop_duplicates()
+# ==================================================
+# 1. 유저 이름 로드
+#    현재: DB(player) 직접 조회.
+#    TODO: 추후 백엔드 API 호출로 전환 예정.
+# ==================================================
+user_name = load_user_name_dataframe()
+print(f"유저명 매핑 {len(user_name):,}건 로드 완료.")
 
 # ==================================================
 # 2. summary_df_elo에 riot_name 붙이기
@@ -267,9 +264,11 @@ print(position_dfs['TOP'].head())
 # ==================================================
 sheet_order = ['TOTAL', 'TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM', 'UTILITY']
 
-with pd.ExcelWriter('position_user_summary_final.xlsx') as writer:
+output_path = get_output_dir() / 'position_user_summary_final.xlsx'
+
+with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
     for sheet_name in sheet_order:
         if sheet_name in position_dfs:
             position_dfs[sheet_name].to_excel(writer, sheet_name=sheet_name, index=False)
 
-print("\n엑셀 저장 완료: position_user_summary_final.xlsx")
+print(f"\n엑셀 저장 완료: {output_path}")

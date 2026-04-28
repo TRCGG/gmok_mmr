@@ -1,38 +1,24 @@
-user_name_path = r"C:/Users/PC/Desktop/김필준/data/2026 유저_0415.csv"
-
-try:
-    user_name = pd.read_csv(user_name_path, encoding='utf-8', on_bad_lines='skip')
-except UnicodeDecodeError:
-    user_name = pd.read_csv(user_name_path, encoding='cp949', on_bad_lines='skip')
-
-user_name = user_name[['puuid', 'riot_name']].drop_duplicates()
-
-
-mmr_df_updated_elo = mmr_df_updated_elo.merge(
-    user_name[['puuid', 'riot_name']],
-    on='puuid',
-    how='left'
-)
-
-
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-# ==============================================================
-# 0. 유저 이름 파일 로드 + 데이터 연결
-# ==============================================================
+from mmr_refactor.data_loader import load_user_name_dataframe
 
-user_name_path = r"C:/Users/PC/Desktop/김필준/data/2026 유저_0415.csv"
-
+# Jupyter 의 display() 가 없는 환경에서는 print 로 대체
 try:
-    user_name = pd.read_csv(user_name_path, encoding="utf-8", on_bad_lines="skip")
-    print("UTF-8 인코딩으로 유저 이름 파일 로드 성공")
-except UnicodeDecodeError:
-    user_name = pd.read_csv(user_name_path, encoding="cp949", on_bad_lines="skip")
-    print("CP949 인코딩으로 유저 이름 파일 로드 성공")
+    from IPython.display import display  # type: ignore  # noqa: F401
+except ImportError:
+    def display(obj):  # type: ignore[no-redef]
+        print(obj)
 
-user_name = user_name[["puuid", "riot_name"]].drop_duplicates()
+# ==============================================================
+# 0. 유저 이름 로드 + 데이터 연결
+#    현재: DB(player) 직접 조회.
+#    TODO: 추후 백엔드 API 호출로 전환 예정.
+# ==============================================================
+
+user_name = load_user_name_dataframe()
+print(f"유저명 매핑 {len(user_name):,}건 로드 완료.")
 
 # summary_df_elo에 riot_name 붙이기
 summary_df_elo = summary_df_elo.drop(
@@ -749,20 +735,15 @@ def run_player_report(player_name):
     display(report["radar_table"])
 
 
-run_player_report("이건끄미야")
+if __name__ == "__main__":
+    # 모듈 import 시 자동 실행되지 않도록 가드
+    run_player_report("이건끄미야")
 
+    # 디버그용 globals 확인
+    print('summary_df_elo' in globals())
+    print('mmr_df_updated_elo' in globals())
+    print('user_name' in globals())
 
-# 1. 먼저 이것 확인
-print('summary_df_elo' in globals())
-print('mmr_df_updated_elo' in globals())
-print('user_name' in globals())
-
-
-print('position_dfs' in globals())
-print(type(position_dfs))
-print(position_dfs.keys())
-
-
-print('position_dfs' in globals())
-print(type(position_dfs))
-print(position_dfs.keys())
+    print('position_dfs' in globals())
+    print(type(position_dfs))
+    print(position_dfs.keys())

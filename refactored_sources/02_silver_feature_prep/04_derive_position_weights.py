@@ -4,7 +4,6 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
-import sys
 
 # --- 사용할 지표 선택 (변경된 변수명 반영) ---
 metrics = [
@@ -38,8 +37,8 @@ df_scaled = mmr_df_cleaned_default.copy()
 try:
     df_scaled[metrics] = scaler.fit_transform(df_scaled[metrics])
 except KeyError as e:
-    print(f"에러! 컬럼 {e} 이(가) 데이터프레임에 없습니다. metrics 리스트를 확인하세요.")
-    sys.exit()
+    # 호출자(파이프라인)에게 위임 — sys.exit()은 노트북/스크립트 전체를 죽이므로 사용 금지
+    raise KeyError(f"컬럼 {e} 이(가) 데이터프레임에 없습니다. metrics 리스트를 확인하세요.") from e
 
 # --- 포지션별 feature importance 저장 ---
 position_importances = {}

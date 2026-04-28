@@ -24,6 +24,12 @@ class Section:
 
 HEADER_PATTERN = re.compile(r"^#+\s*(.+)$")
 
+# 분리된 셀이 단독으로 import 누락 없이 동작하도록 모든 출력 파일 상단에 prepend
+COMMON_IMPORTS = (
+    "import numpy as np\n"
+    "import pandas as pd\n"
+)
+
 # Data-engineering friendly output layout (medallion-inspired + analytics/reporting split)
 SECTION_LAYOUT: dict[int, tuple[str, str]] = {
     1: ("01_bronze_ingestion", "environment_setup"),
@@ -111,7 +117,7 @@ def write_sections(notebook_path: str | Path, out_dir: str | Path) -> list[Path]
         path = _resolve_output_path(out_dir, i, section.title)
         path.parent.mkdir(parents=True, exist_ok=True)
         body = "\n\n\n".join(section.code_blocks).rstrip() + "\n"
-        path.write_text(body, encoding="utf-8")
+        path.write_text(COMMON_IMPORTS + "\n" + body, encoding="utf-8")
         written.append(path)
 
     return written
