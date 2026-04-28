@@ -1,11 +1,17 @@
-import pandas as pd
+"""포지션별 feature_importance(가중치) 도출.
+
+핵심 계산은 `mmr_refactor.game_impact.derive_position_weights` 로 위임.
+이 파일은 입력 컬럼 정의 + 시각화만 담당.
+"""
+
 import numpy as np
+import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.preprocessing import StandardScaler
 
-# --- 사용할 지표 선택 (변경된 변수명 반영) ---
+from mmr_refactor.game_impact import derive_position_weights
+
+# --- 사용할 지표 선택 ---
 metrics = [
     'kills',
     'deaths',
@@ -28,48 +34,19 @@ metrics = [
     'lane_gold_diff'
 ]
 
-target = 'game_result'   # 1 = win, 0 = loss
-
-# --- 스케일링 ---
-scaler = StandardScaler()
-df_scaled = mmr_df_cleaned_default.copy()
-
-try:
-    df_scaled[metrics] = scaler.fit_transform(df_scaled[metrics])
-except KeyError as e:
-    # 호출자(파이프라인)에게 위임 — sys.exit()은 노트북/스크립트 전체를 죽이므로 사용 금지
-    raise KeyError(f"컬럼 {e} 이(가) 데이터프레임에 없습니다. metrics 리스트를 확인하세요.") from e
-
-# --- 포지션별 feature importance 저장 ---
-position_importances = {}
-
-for pos in df_scaled['position'].dropna().unique():
-    df_pos = df_scaled[df_scaled['position'] == pos].copy()
-
-    X = df_pos[metrics]
-    y = df_pos[target]
-
-    if len(y.unique()) < 2 or len(df_pos) < 5:
-        print(f"안내: 포지션 '{pos}'은 승패 데이터가 부족하거나 표본 수가 부족하여 분석에서 제외됩니다.")
-        continue
-
-    X = X.replace([np.inf, -np.inf], np.nan).dropna()
-    y = y.loc[X.index]
-
-    if X.shape[0] == 0:
-        print(f"안내: 포지션 '{pos}'은 유효한 데이터가 없어 분석에서 제외됩니다.")
-        continue
-
-    model = RandomForestClassifier(
-        n_estimators=200,
-        random_state=42
-    )
-    model.fit(X, y)
-
-    importances = model.feature_importances_
-    position_importances[pos] = dict(zip(metrics, importances))
+# --- 포지션별 가중치 산출 (모듈 호출) ---
+position_importances_df = derive_position_weights(
+    mmr_df_cleaned_default,
+    metrics=metrics,
+    target='game_result',
+)
 
 # --- 시각화 ---
+position_importances = {
+    pos: position_importances_df[pos].to_dict()
+    for pos in position_importances_df.columns
+}
+
 if not position_importances:
     print("분석 가능한 포지션 데이터가 없어 그래프를 그릴 수 없습니다. 원본 데이터를 확인하세요.")
 else:
@@ -108,6 +85,4 @@ else:
     plt.tight_layout(rect=[0, 0.03, 1, 0.98])
     plt.show()
 
-# --- 결과 DataFrame ---
-position_importances_df = pd.DataFrame(position_importances).fillna(0)
 print(position_importances_df)
