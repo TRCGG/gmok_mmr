@@ -1,3 +1,4 @@
+-- TODO: 현재 미사용. 추후 정리(삭제처리) 예정.
 CREATE TABLE League (
 	game_id VARCHAR(128) PRIMARY KEY, 		-- 리플파일이름  
 	raw_data JSONB NOT NULL,		    -- 원시데이터
