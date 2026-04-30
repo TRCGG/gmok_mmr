@@ -23,7 +23,7 @@ from sklearn.preprocessing import MinMaxScaler, QuantileTransformer, StandardSca
 
 
 # =====================================================
-# 1) Position weights (RandomForest feature importance)
+# 1) 포지션별 가중치(RandomForest feature importance)
 # =====================================================
 
 def derive_position_weights(
@@ -37,7 +37,7 @@ def derive_position_weights(
 ) -> pd.DataFrame:
     """포지션별 RandomForestClassifier 의 feature_importance 를 계산.
 
-    Returns:
+    반환:
         DataFrame (index=feature, columns=position, values=importance).
         importance 가 없는 (포지션, feature) 셀은 0 으로 채워진다.
 
@@ -97,7 +97,7 @@ def resolve_position_weights(
     random_state: int = 42,
     min_samples: int = 5,
 ) -> pd.DataFrame:
-    """Use supplied position weights, or learn them from the current dataset."""
+    """전달된 포지션 가중치를 사용하거나, 없으면 현재 데이터에서 학습한다."""
     if position_weights is not None:
         return position_weights.copy()
 
@@ -113,7 +113,7 @@ def resolve_position_weights(
 
 
 # =====================================================
-# 2) Raw game impact (weighted sum per row)
+# 2) Raw game impact(row 단위 가중합)
 # =====================================================
 
 def compute_raw_game_impact(

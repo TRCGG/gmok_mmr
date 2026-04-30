@@ -1,4 +1,4 @@
-"""Feature engineering helpers for the MMR pipeline."""
+"""MMR 파이프라인에서 사용하는 feature engineering 모듈."""
 
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ BASE_METRICS = [
 
 
 def add_basic_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Create DB-compatible derived features used by the MMR logic."""
+    """MMR 로직에서 사용할 DB 호환 파생 feature를 생성한다."""
     out = df.copy()
     duration = out["game_duration"].replace(0, np.nan)
     deaths = out["deaths"].replace(0, np.nan)
@@ -73,7 +73,7 @@ def add_basic_features(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _compute_lane_gold_diff(df: pd.DataFrame) -> pd.Series:
-    """Return gold difference against the same-game same-position opponent."""
+    """같은 경기, 같은 포지션 상대와의 gold 차이를 반환한다."""
     opponent_gold_sum = df.groupby(["replay_code", "position"])["gold"].transform("sum") - df["gold"]
     opponent_count = df.groupby(["replay_code", "position"])["gold"].transform("count") - 1
     opponent_gold = opponent_gold_sum / opponent_count.replace(0, np.nan)
@@ -84,6 +84,6 @@ def select_available_metrics(
     df: pd.DataFrame,
     metrics: list[str] | None = None,
 ) -> list[str]:
-    """Return configured metric columns that exist in the given DataFrame."""
+    """설정된 metric 중 입력 DataFrame에 존재하는 컬럼만 반환한다."""
     metric_candidates = BASE_METRICS if metrics is None else metrics
     return [column for column in metric_candidates if column in df.columns]

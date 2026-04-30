@@ -1,4 +1,4 @@
-"""Section splitter for converting mixed notebook cells into layered Python modules."""
+"""notebook cell을 계층형 Python 모듈로 분리하는 section splitter."""
 
 from __future__ import annotations
 
@@ -11,11 +11,11 @@ from .notebook_loader import get_cell_text, iter_cells
 
 @dataclass
 class Section:
-    """Container for one logical notebook section.
+    """하나의 논리적 notebook section을 담는 컨테이너.
 
-    Attributes:
-        title: Normalized section title derived from markdown header.
-        code_blocks: Ordered code cell contents that belong to this section.
+    속성:
+        title: markdown header에서 만든 정규화된 section 제목.
+        code_blocks: 이 section에 속한 code cell 내용 목록.
     """
 
     title: str
@@ -30,7 +30,7 @@ COMMON_IMPORTS = (
     "import pandas as pd\n"
 )
 
-# Data-engineering friendly output layout (medallion-inspired + analytics/reporting split)
+# 데이터 엔지니어링 레이어 기준 출력 구조
 SECTION_LAYOUT: dict[int, tuple[str, str]] = {
     1: ("01_bronze_ingestion", "environment_setup"),
     2: ("01_bronze_ingestion", "load_raw_match_data"),
@@ -48,19 +48,19 @@ SECTION_LAYOUT: dict[int, tuple[str, str]] = {
 
 
 def slugify(text: str) -> str:
-    """Convert raw header text into a safe snake-case slug."""
+    """원본 header 텍스트를 안전한 snake-case slug로 변환한다."""
     slug = re.sub(r"[^0-9a-zA-Z가-힣]+", "_", text.strip()).strip("_").lower()
     return slug or "section"
 
 
 def split_notebook_by_markdown_headers(notebook_path: str | Path) -> list[Section]:
-    """Group code cells by nearest markdown header.
+    """가장 가까운 markdown header 기준으로 code cell을 묶는다.
 
-    Args:
-        notebook_path: Notebook-like `.py` JSON file path.
+    인자:
+        notebook_path: notebook 형태 `.py` JSON 파일 경로.
 
-    Returns:
-        Ordered list of `Section` objects with grouped code blocks.
+    반환:
+        code block이 묶인 `Section` 객체 목록.
     """
     sections: list[Section] = []
     current = Section(title="00_bootstrap")
@@ -86,9 +86,9 @@ def split_notebook_by_markdown_headers(notebook_path: str | Path) -> list[Sectio
 
 
 def _resolve_output_path(out_dir: Path, index: int, section_title: str) -> Path:
-    """Resolve output file path using predefined DE layer mapping.
+    """미리 정의한 데이터 엔지니어링 레이어 매핑으로 출력 파일 경로를 결정한다.
 
-    Falls back to `99_misc` if no mapping exists for a section index.
+    section index에 대한 매핑이 없으면 `99_misc`로 보낸다.
     """
     folder_name, file_name = SECTION_LAYOUT.get(
         index,
@@ -98,14 +98,14 @@ def _resolve_output_path(out_dir: Path, index: int, section_title: str) -> Path:
 
 
 def write_sections(notebook_path: str | Path, out_dir: str | Path) -> list[Path]:
-    """Write section-split Python files into layered folders.
+    """section별 Python 파일을 계층형 폴더에 쓴다.
 
-    Args:
-        notebook_path: Source notebook-like `.py` JSON file.
-        out_dir: Root output directory for generated section files.
+    인자:
+        notebook_path: 원본 notebook 형태 `.py` JSON 파일.
+        out_dir: 생성된 section 파일을 저장할 root output 경로.
 
-    Returns:
-        List of written file paths in creation order.
+    반환:
+        생성 순서대로 정렬된 파일 경로 목록.
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)

@@ -1,14 +1,13 @@
-"""Raw match and user-data loaders.
+"""원천 경기 데이터와 사용자명 데이터 loader 모듈.
 
-Current test flow:
+현재 테스트 흐름:
     PostgreSQL -> pandas DataFrame
 
-Final service flow:
+최종 서비스 흐름:
     Backend API -> pandas DataFrame
 
-The rest of the MMR pipeline should call only ``load_match_dataframe`` and
-``load_user_name_dataframe`` so the transport can change without touching the
-calculation modules.
+MMR 계산 모듈은 ``load_match_dataframe``과 ``load_user_name_dataframe``만
+호출한다. 이렇게 두면 DB/API 전송 방식이 바뀌어도 계산 로직은 수정하지 않는다.
 """
 
 from __future__ import annotations
@@ -27,7 +26,7 @@ from .repository import (
 
 
 def load_match_dataframe(source: str | None = None) -> pd.DataFrame:
-    """Load row-level raw match data from the configured source."""
+    """설정된 입력 방식에서 row 단위 원천 경기 데이터를 읽는다."""
     source = (source or get_data_source()).lower()
     if source == "db":
         return load_match_dataframe_from_db()
@@ -37,7 +36,7 @@ def load_match_dataframe(source: str | None = None) -> pd.DataFrame:
 
 
 def load_user_name_dataframe(source: str | None = None) -> pd.DataFrame:
-    """Load ``puuid`` to ``riot_name`` mapping from the configured source."""
+    """설정된 입력 방식에서 ``puuid``와 ``riot_name`` 매핑을 읽는다."""
     source = (source or get_data_source()).lower()
     if source == "db":
         return load_user_name_dataframe_from_db()
@@ -54,10 +53,9 @@ def _api_headers() -> dict[str, str]:
 
 
 def _load_match_from_api() -> pd.DataFrame:
-    """Read raw player-game records from the backend API.
+    """백엔드 API에서 원천 player-game 레코드를 읽는다.
 
-    Expected response shape is a JSON array whose keys match the pipeline
-    column names used by ``_load_match_from_db``.
+    응답은 파이프라인 컬럼명과 같은 key를 가진 JSON 배열이어야 한다.
     """
     import requests
 
@@ -71,7 +69,7 @@ def _load_match_from_api() -> pd.DataFrame:
 
 
 def _load_user_name_from_api() -> pd.DataFrame:
-    """Read user names from the backend API."""
+    """백엔드 API에서 사용자명 데이터를 읽는다."""
     import requests
 
     resp = requests.get(

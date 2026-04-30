@@ -1,8 +1,8 @@
-"""MMR result writers.
+"""MMR 계산 결과 writer 모듈.
 
-Current test flow writes calculated outputs to PostgreSQL. The public
-``save_mmr_results`` function can later route to the backend API without
-changing the calculation pipeline.
+현재 테스트 흐름은 계산 결과를 PostgreSQL에 저장한다. 추후에는
+``save_mmr_results``의 라우팅만 API 방식으로 바꾸고 계산 파이프라인은
+그대로 유지할 수 있다.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ def save_mmr_results(
     user_summary: pd.DataFrame,
     sink: str | None = None,
 ) -> None:
-    """Save row-level and summary MMR outputs to the configured destination."""
+    """row 단위 결과와 요약 결과를 설정된 저장 방식으로 저장한다."""
     sink = (sink or get_result_sink()).lower()
     if sink == "db":
         _save_results_to_db(match_results, user_summary)
@@ -46,7 +46,7 @@ def _stamp(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _save_results_to_db(match_results: pd.DataFrame, user_summary: pd.DataFrame) -> None:
-    """Append calculated MMR outputs to PostgreSQL tables."""
+    """계산된 MMR 결과를 PostgreSQL 테이블에 추가 저장한다."""
     save_mmr_results_to_db(_stamp(match_results), _stamp(user_summary))
 
 
@@ -59,7 +59,7 @@ def _api_headers() -> dict[str, str]:
 
 
 def _save_results_to_api(match_results: pd.DataFrame, user_summary: pd.DataFrame) -> None:
-    """Post calculated MMR outputs to the backend API."""
+    """계산된 MMR 결과를 백엔드 API로 전송한다."""
     import requests
 
     payload = {

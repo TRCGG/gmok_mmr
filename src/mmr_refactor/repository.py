@@ -1,8 +1,7 @@
-"""Database repository functions for the MMR pipeline.
+"""MMR 파이프라인의 DB repository 모듈.
 
-This module owns SQL statements and DB reads/writes. Higher-level loader/writer
-modules decide whether the pipeline uses DB or API, then call this repository
-when DB mode is selected.
+SQL 문과 DB read/write 책임은 이 모듈에서 관리한다. 상위 loader/writer는
+DB/API 사용 여부만 판단하고, DB 모드일 때 이 repository를 호출한다.
 """
 
 from __future__ import annotations
@@ -20,7 +19,7 @@ from .config import (
 
 
 def load_match_dataframe_from_db() -> pd.DataFrame:
-    """Read raw player-game records from PostgreSQL."""
+    """PostgreSQL에서 원천 player-game 레코드를 읽는다."""
     engine = create_engine(get_db_url())
     player_game_table = get_player_game_table()
 
@@ -95,7 +94,7 @@ def load_match_dataframe_from_db() -> pd.DataFrame:
 
 
 def load_user_name_dataframe_from_db() -> pd.DataFrame:
-    """Read ``puuid`` to ``riot_name`` mapping from PostgreSQL."""
+    """PostgreSQL에서 ``puuid``와 ``riot_name`` 매핑을 읽는다."""
     engine = create_engine(get_db_url())
     player_table = get_player_table()
     query = text(
@@ -114,7 +113,7 @@ def save_mmr_results_to_db(
     match_results: pd.DataFrame,
     user_summary: pd.DataFrame,
 ) -> None:
-    """Append calculated MMR outputs to PostgreSQL tables."""
+    """계산된 MMR 결과를 PostgreSQL 결과 테이블에 추가 저장한다."""
     engine = create_engine(get_db_url())
     with engine.begin() as conn:
         _align_to_table_columns(match_results, conn, get_mmr_match_result_table()).to_sql(
@@ -140,7 +139,7 @@ def _align_to_table_columns(
     conn,
     table_name: str,
 ) -> pd.DataFrame:
-    """Keep only columns that exist in the target DB table."""
+    """대상 DB 테이블에 실제로 존재하는 컬럼만 남긴다."""
     table_cols = {col["name"] for col in inspect(conn).get_columns(table_name)}
     keep_cols = [col for col in df.columns if col in table_cols]
     return df[keep_cols]
