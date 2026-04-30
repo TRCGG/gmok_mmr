@@ -179,6 +179,161 @@ MMR 운영에서는 weight가 바뀌면 최종 점수도 바뀐다. 따라서 �
 
 이번 변경은 그 구조로 넘어가기 위한 최소 변경이다.
 
+## 5. MMR 계산 설정값 분리
+
+### 대상 파일
+
+- `src/mmr_refactor/mmr.py`
+- `src/mmr_refactor/__init__.py`
+- `tests/test_mmr.py`
+
+### 대상 객체와 함수
+
+- `MMRSettings`
+- `DEFAULT_MMR_SETTINGS`
+- `calculate_personal_factor`
+- `calculate_k_factor`
+- `update_mmr_elo`
+
+### 기존 문제
+
+MMR 계산에 사용하는 주요 튜닝값이 `mmr.py`의 모듈 상수에 직접 묶여 있었다.
+
+대상 값:
+
+- 승리 기본 변화량
+- 패배 기본 변화량
+- 개인 기여도 반영 비율
+- 상대 포지션 비교 반영 비율
+- ELO 기대값 대비 실제값 반영 비율
+- 초기 MMR
+- MMR 변화량 최소/최대값
+- 고 MMR 구간 K-factor 감쇠 설정
+- 포지션 목록
+
+이 구조에서는 점수 정책을 실험하거나 운영 설정을 분리할 때 코드 내부 상수를 직접 수정해야 한다.
+
+### 수정 내용
+
+`MMRSettings` dataclass를 추가하고 기본값은 기존 상수와 동일하게 유지했다.
+
+`DEFAULT_MMR_SETTINGS`는 현재 기본 계산 정책을 의미한다.
+
+다음 함수는 선택적으로 `settings`를 받을 수 있게 변경했다.
+
+- `calculate_personal_factor`
+- `calculate_k_factor`
+- `update_mmr_elo`
+
+기존 호출 방식은 그대로 동작한다.
+
+```python
+update_mmr_elo(df)
+```
+
+필요하면 테스트나 운영 코드에서 명시적으로 설정을 주입할 수 있다.
+
+```python
+settings = MMRSettings(initial_mmr=1400)
+update_mmr_elo(df, settings=settings)
+```
+
+### 수정 이유
+
+MMR 계산 정책은 운영 중 조정 가능성이 높다. 특히 초기 MMR, K-factor 감쇠, 승패 기본 변화량은 실제 분포를 보고 조정할 가능성이 크다.
+
+이번 변경은 기본 산식과 기본 결과를 유지하면서, 설정값만 외부에서 주입할 수 있게 만든 것이다.
+
+즉, 현재 운영 결과를 바꾸기 위한 변경이 아니라 추후 점수 정책 실험과 버전 관리를 가능하게 하기 위한 구조 변경이다.
+
+## 6. DB 조회 컬럼과 Game Impact metric 원본 기준 복원
+
+### 대상 파일
+
+- `src/mmr_refactor/repository.py`
+- `src/mmr_refactor/features.py`
+- `docs/MMR_LOGIC_SOURCE_2026-04-30.py`
+- `tests/test_main_pipeline.py`
+- `tests/test_repository.py`
+
+### 기존 문제
+
+리팩토링 과정에서 DB 조회 컬럼과 `BASE_METRICS`가 현재 저장에 필요한 최소 컬럼 중심으로 줄어 있었다.
+
+하지만 원본 notebook의 Game Impact 학습 metric은 더 넓은 컬럼을 사용한다.
+
+원본 기준 주요 metric:
+
+- `kills`
+- `deaths`
+- `assists`
+- `gold_per_min`
+- `exp_per_min`
+- `dpm`
+- `damage_to_turrets_per_min`
+- `vision_score`
+- `damage_taken_per_min`
+- `cs_per_min`
+- `kda`
+- `damage_taken_per_death`
+- `damage_dealt_per_death`
+- `wards_placed_per_min`
+- `wards_killed_per_min`
+- `cc_time_per_min`
+- `heal_on_teammates`
+- `shield_on_teammates`
+- `lane_gold_diff`
+
+이 metric 목록이 줄어 있으면 RandomForest feature importance가 달라지고, 이후 `raw_game_impact`, `game_impact_winloss_norm`, `game_n_person_contribution`, `game_impact_vs_opponent`, 최종 MMR까지 달라질 수 있다.
+
+### 수정 내용
+
+DB 조회 SQL에서 원본 MMR 계산에 쓰였던 raw source 컬럼을 추가로 가져오도록 변경했다.
+
+추가한 대표 raw 컬럼:
+
+- `exp`
+- `damage_to_turrets`
+- `minions_killed`
+- `neutral_minions_killed`
+- `wards_placed`
+- `wards_killed`
+- `time_spent_dead`
+- `heal_on_teammates`
+- `shield_on_teammates`
+
+`features.py`에서는 원본 metric에 맞춰 파생 컬럼을 생성하도록 보강했다.
+
+추가 생성:
+
+- `exp_per_min`
+- `damage_to_turrets_per_min`
+- `cs_per_min`
+- `wards_placed_per_min`
+- `wards_killed_per_min`
+- `dead_time_pct`
+- `lane_gold_diff`
+
+`lane_gold_diff`는 같은 `replay_code + position`의 상대 gold를 기준으로 계산한다.
+
+### 저장 테이블 관련 주의사항
+
+DB 조회와 Game Impact 계산에는 원본 metric 기준의 raw/derived 컬럼을 사용한다.
+
+다만 현재 결과 저장 테이블인 `mmr_match_results`는 모든 raw/derived metric 컬럼을 저장하지 않는다. `data_writer`와 `repository`는 DB 테이블에 존재하는 컬럼만 골라 저장하므로, 추가 조회 컬럼이 있어도 저장은 실패하지 않는다.
+
+현재 구조의 의미:
+
+- 계산 단계: 원본 notebook 기준 metric pool 사용
+- 저장 단계: `mmr_match_results`, `mmr_user_summary` DDL에 있는 컬럼만 저장
+- 추가 metric까지 저장하려면 별도 migration으로 결과 테이블 컬럼을 확장해야 함
+
+### 수정 이유
+
+MMR의 ELO 산식은 유지되더라도, Game Impact에 투입되는 feature가 달라지면 최종 MMR 값은 달라질 수 있다.
+
+따라서 DB 기반 테스트/운영에서도 원본 notebook과 같은 feature pool을 사용하도록 조회 컬럼과 feature 생성 로직을 맞췄다.
+
 ## 검증
 
 실행한 검증:

@@ -13,6 +13,8 @@ Private helpers:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 import pandas as pd
 
@@ -39,6 +41,27 @@ DEFAULT_POSITIONS: tuple[str, ...] = (
     "TOP", "BOTTOM", "MIDDLE", "JUNGLE", "UTILITY",
 )
 
+
+@dataclass(frozen=True)
+class MMRSettings:
+    """Tunable constants used by the MMR calculation."""
+
+    base_win: int = BASE_WIN
+    base_loss: int = BASE_LOSS
+    alpha: float = ALPHA
+    beta: float = BETA
+    gamma: float = GAMMA
+    initial_mmr: int = INITIAL_MMR
+    min_change: int = MMR_MIN_CHANGE
+    max_change: int = MMR_MAX_CHANGE
+    k_decay_start: int = MMR_K_DECAY_START
+    k_decay_rate: float = MMR_K_DECAY_RATE
+    k_min: float = MMR_K_MIN
+    positions: tuple[str, ...] = DEFAULT_POSITIONS
+
+
+DEFAULT_MMR_SETTINGS = MMRSettings()
+
 REQUIRED_MMR_COLUMNS: tuple[str, ...] = (
     "played_at",
     "replay_code",
@@ -59,7 +82,12 @@ def expected_performance(mmr_a: float, mmr_b: float) -> float:
     return 1 / (1 + 10 ** ((mmr_b - mmr_a) / 400))
 
 
-def calculate_personal_factor(row: pd.Series, f1_mean: float, f2_mean: float) -> float:
+def calculate_personal_factor(
+    row: pd.Series,
+    f1_mean: float,
+    f2_mean: float,
+    settings: MMRSettings = DEFAULT_MMR_SETTINGS,
+) -> float:
     """개인 기여도 factor.
 
     - f1: game_n_person_contribution / 평균
@@ -76,15 +104,18 @@ def calculate_personal_factor(row: pd.Series, f1_mean: float, f2_mean: float) ->
     f1 = np.clip(f1, 0.5, 2)
     f2 = np.clip(f2, 0.5, 2)
 
-    return (f1 ** ALPHA) * (f2 ** BETA)
+    return (f1 ** settings.alpha) * (f2 ** settings.beta)
 
 
-def calculate_k_factor(mmr: float) -> float:
+def calculate_k_factor(
+    mmr: float,
+    settings: MMRSettings = DEFAULT_MMR_SETTINGS,
+) -> float:
     """MMR 이 높을수록 점수 변동폭 축소 (>= MMR_K_MIN)."""
     k = 1.0
-    if mmr > MMR_K_DECAY_START:
-        k = 1.0 - ((mmr - MMR_K_DECAY_START) * MMR_K_DECAY_RATE)
-    return max(k, MMR_K_MIN)
+    if mmr > settings.k_decay_start:
+        k = 1.0 - ((mmr - settings.k_decay_start) * settings.k_decay_rate)
+    return max(k, settings.k_min)
 
 
 def validate_mmr_input_matches(
@@ -245,7 +276,10 @@ def make_summary_df_wide(
 # Main MMR update (ELO + personal factor + relative factor)
 # ==============================================================
 
-def update_mmr_elo(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+def update_mmr_elo(
+    df: pd.DataFrame,
+    settings: MMRSettings = DEFAULT_MMR_SETTINGS,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     """게임 단위로 순회하며 (puuid x position) MMR 을 갱신한다.
 
     NOTE: 입력 df 는 ``played_at``, ``replay_code``, ``puuid``, ``position``,
@@ -255,7 +289,7 @@ def update_mmr_elo(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     Returns:
         (mmr_df_updated, summary_df_wide)
     """
-    validate_mmr_input_matches(df)
+    validate_mmr_input_matches(df, positions=settings.positions)
     df = df.sort_values(by=["played_at", "replay_code", "puuid"]).copy()
 
     player_pos_mmr: dict[str, dict[str, int]] = {}
@@ -277,7 +311,7 @@ def update_mmr_elo(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
             player_pos_mmr.setdefault(pid, {})
             player_pos_record.setdefault(pid, {})
 
-            player_pos_mmr[pid].setdefault(pos, INITIAL_MMR)
+            player_pos_mmr[pid].setdefault(pos, settings.initial_mmr)
             player_pos_record[pid].setdefault(pos, {"win": 0, "total": 0})
 
             pre_mmr[(pid, pos)] = int(player_pos_mmr[pid][pos])
@@ -292,10 +326,10 @@ def update_mmr_elo(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
                 (game_df["position"] == pos) & (game_df["puuid"] != pid)
             ]
 
-            opponent_mmr = INITIAL_MMR
+            opponent_mmr = settings.initial_mmr
             if not opponent_df.empty:
                 opp_id = opponent_df.iloc[0]["puuid"]
-                opponent_mmr = pre_mmr.get((opp_id, pos), INITIAL_MMR)
+                opponent_mmr = pre_mmr.get((opp_id, pos), settings.initial_mmr)
 
             expected = expected_performance(current_mmr, opponent_mmr)
 
@@ -306,17 +340,17 @@ def update_mmr_elo(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
             )
 
             relative_factor = actual / expected if expected > 0 else 1
-            personal_factor = calculate_personal_factor(row, f1_mean, f2_mean)
-            final_factor = personal_factor * (relative_factor ** GAMMA)
+            personal_factor = calculate_personal_factor(row, f1_mean, f2_mean, settings=settings)
+            final_factor = personal_factor * (relative_factor ** settings.gamma)
 
-            k = calculate_k_factor(current_mmr)
+            k = calculate_k_factor(current_mmr, settings=settings)
 
             if row["game_result"] == 1:
-                delta = BASE_WIN * final_factor * k
-                delta = np.clip(max(delta, 12), 12, MMR_MAX_CHANGE)
+                delta = settings.base_win * final_factor * k
+                delta = np.clip(max(delta, 12), 12, settings.max_change)
             else:
-                delta = BASE_LOSS * final_factor * k
-                delta = np.clip(min(delta, -12), MMR_MIN_CHANGE, -12)
+                delta = settings.base_loss * final_factor * k
+                delta = np.clip(min(delta, -12), settings.min_change, -12)
 
             delta = int(round(delta))
             new_mmr = int(current_mmr + delta)
@@ -351,12 +385,12 @@ def update_mmr_elo(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
                 weighted_sum += pos_mmr[p] * g
                 total_games += g
 
-            total_mmr = int(round(weighted_sum / total_games)) if total_games > 0 else INITIAL_MMR
+            total_mmr = int(round(weighted_sum / total_games)) if total_games > 0 else settings.initial_mmr
 
             row_copy["total_mmr"] = total_mmr
             updated_rows.append(row_copy)
 
     mmr_df_updated = pd.DataFrame(updated_rows)
-    summary_df = make_summary_df_wide(mmr_df_updated)
+    summary_df = make_summary_df_wide(mmr_df_updated, positions=settings.positions)
 
     return mmr_df_updated, summary_df

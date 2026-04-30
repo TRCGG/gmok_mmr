@@ -12,7 +12,13 @@ from .game_impact import (
     compute_n_person_contribution,
     compute_vs_opponent,
 )
-from .mmr import update_mmr_elo, make_summary_df_wide, validate_mmr_input_matches
+from .mmr import (
+    DEFAULT_MMR_SETTINGS,
+    MMRSettings,
+    update_mmr_elo,
+    make_summary_df_wide,
+    validate_mmr_input_matches,
+)
 
 __all__ = [
     "split_notebook_by_markdown_headers",
@@ -32,6 +38,8 @@ __all__ = [
     "normalize_by_position_outcome",
     "compute_n_person_contribution",
     "compute_vs_opponent",
+    "DEFAULT_MMR_SETTINGS",
+    "MMRSettings",
     "update_mmr_elo",
     "make_summary_df_wide",
     "validate_mmr_input_matches",

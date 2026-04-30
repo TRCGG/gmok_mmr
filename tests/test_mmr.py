@@ -5,6 +5,8 @@ import pandas as pd
 import pytest
 
 from mmr_refactor.mmr import (
+    DEFAULT_MMR_SETTINGS,
+    MMRSettings,
     calculate_k_factor,
     expected_performance,
     make_summary_df_wide,
@@ -54,6 +56,12 @@ def test_calculate_k_factor_decays_but_has_floor():
     assert calculate_k_factor(9999) == 0.35
 
 
+def test_calculate_k_factor_accepts_custom_settings():
+    settings = MMRSettings(k_decay_start=1000, k_decay_rate=0.01, k_min=0.2)
+
+    assert calculate_k_factor(1100, settings=settings) == 0.2
+
+
 def test_validate_mmr_input_matches_accepts_valid_ten_player_match():
     validate_mmr_input_matches(_valid_mmr_input())
 
@@ -80,6 +88,17 @@ def test_update_mmr_elo_creates_expected_columns_and_direction():
     assert updated.loc[updated["puuid"] == "top_winner", "mmr_change"].item() > 0
     assert updated.loc[updated["puuid"] == "top_loser", "mmr_change"].item() < 0
     assert {"top_winner", "top_loser"}.issubset(set(summary["puuid"]))
+
+
+def test_update_mmr_elo_accepts_custom_settings():
+    settings = MMRSettings(
+        initial_mmr=DEFAULT_MMR_SETTINGS.initial_mmr + 100,
+        positions=POSITIONS,
+    )
+
+    updated, _ = update_mmr_elo(_valid_mmr_input(), settings=settings)
+
+    assert updated["pre_game_pos_mmr"].eq(settings.initial_mmr).all()
 
 
 def test_make_summary_df_wide_contains_position_columns():
