@@ -17,3 +17,4 @@ venv/
 # Output artifacts
 *.xlsx
 *.png
+pytest-cache-files-*/

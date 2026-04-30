@@ -7,13 +7,16 @@ scipy>=1.11
 statsmodels>=0.14
 koreanize-matplotlib>=0.1.1
 
-# DB access (현재)
+# Environment and database access
+python-dotenv>=1.0
 SQLAlchemy>=2.0
 psycopg2-binary>=2.9
-python-dotenv>=1.0
 
-# Backend API access (TODO: 추후 전환 시 활성화)
-# requests>=2.31
+# Backend API access, used when MMR_DATA_SOURCE=api or MMR_RESULT_SINK=api
+requests>=2.31
 
-# Excel export
+# Optional Excel export/reporting
 openpyxl>=3.1
+
+# Tests
+pytest>=8.0

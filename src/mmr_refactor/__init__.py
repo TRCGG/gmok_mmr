@@ -1,5 +1,6 @@
 from .splitter import split_notebook_by_markdown_headers, write_sections
 from .data_loader import load_match_dataframe, load_user_name_dataframe
+from .data_writer import save_mmr_results
 from .silver import clean_match_data, find_rows_with_na
 from .game_impact import (
     derive_position_weights,
@@ -16,6 +17,7 @@ __all__ = [
     "write_sections",
     "load_match_dataframe",
     "load_user_name_dataframe",
+    "save_mmr_results",
     "clean_match_data",
     "find_rows_with_na",
     "derive_position_weights",
