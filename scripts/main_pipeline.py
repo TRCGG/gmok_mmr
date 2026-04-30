@@ -18,67 +18,41 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-import numpy as np
-
 from mmr_refactor import (
+    add_basic_features,
+    BASE_METRICS,
     clean_match_data,
     compute_n_person_contribution,
     compute_raw_game_impact,
     compute_vs_opponent,
-    derive_position_weights,
     load_match_dataframe,
     normalize_by_position_outcome,
     normalize_minmax_0_100,
+    resolve_position_weights,
     save_mmr_results,
+    select_available_metrics,
     update_mmr_elo,
 )
 
 
-BASE_METRICS = [
-    "kills",
-    "deaths",
-    "assists",
-    "gold_per_min",
-    "dpm",
-    "damage_taken_per_min",
-    "vision_score",
-    "kda",
-    "damage_taken_per_death",
-    "damage_dealt_per_death",
-    "cc_time_per_min",
-]
-
-
-def add_basic_features(df):
-    """Create DB-compatible derived features used by the MMR notebook logic."""
-    out = df.copy()
-    duration = out["game_duration"].replace(0, np.nan)
-    deaths = out["deaths"].replace(0, np.nan)
-
-    out["gold_per_min"] = out["gold"] / duration
-    out["dpm"] = out["damage_to_champions"] / duration
-    out["damage_taken_per_min"] = out["damage_taken"] / duration
-    out["cc_time_per_min"] = out["cc_time"] / duration
-    out["kda"] = (out["kills"] + out["assists"]) / deaths
-    out["damage_taken_per_death"] = out["damage_taken"] / deaths
-    out["damage_dealt_per_death"] = out["damage_to_champions"] / deaths
-
-    out = out.replace([np.inf, -np.inf], np.nan)
-    numeric_cols = out.select_dtypes(include="number").columns
-    out[numeric_cols] = out[numeric_cols].fillna(0)
-    return out
-
-
-def run_pipeline(source: str | None = None, sink: str | None = None):
+def run_pipeline(
+    source: str | None = None,
+    sink: str | None = None,
+    position_weights=None,
+):
     raw_df = load_match_dataframe(source=source)
     clean_df = clean_match_data(raw_df, convert_duration_to_minutes=True)
     feature_df = add_basic_features(clean_df)
 
-    metrics = [c for c in BASE_METRICS if c in feature_df.columns]
+    metrics = select_available_metrics(feature_df, BASE_METRICS)
     if not metrics:
         raise RuntimeError("No usable metric columns were found for Game Impact calculation.")
 
-    position_weights = derive_position_weights(feature_df, metrics=metrics)
+    position_weights = resolve_position_weights(
+        feature_df,
+        metrics=metrics,
+        position_weights=position_weights,
+    )
     feature_df["raw_game_impact"] = compute_raw_game_impact(feature_df, position_weights)
     feature_df["game_impact"] = normalize_minmax_0_100(feature_df["raw_game_impact"])
     feature_df["game_impact_winloss_norm"] = normalize_by_position_outcome(feature_df)

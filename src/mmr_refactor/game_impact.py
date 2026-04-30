@@ -87,6 +87,31 @@ def derive_position_weights(
     return pd.DataFrame(position_importances).fillna(0)
 
 
+def resolve_position_weights(
+    df: pd.DataFrame,
+    metrics: list[str],
+    position_weights: pd.DataFrame | None = None,
+    target: str = "game_result",
+    position_col: str = "position",
+    n_estimators: int = 200,
+    random_state: int = 42,
+    min_samples: int = 5,
+) -> pd.DataFrame:
+    """Use supplied position weights, or learn them from the current dataset."""
+    if position_weights is not None:
+        return position_weights.copy()
+
+    return derive_position_weights(
+        df,
+        metrics=metrics,
+        target=target,
+        position_col=position_col,
+        n_estimators=n_estimators,
+        random_state=random_state,
+        min_samples=min_samples,
+    )
+
+
 # =====================================================
 # 2) Raw game impact (weighted sum per row)
 # =====================================================

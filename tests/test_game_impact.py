@@ -9,6 +9,7 @@ from mmr_refactor.game_impact import (
     compute_vs_opponent,
     normalize_by_position_outcome,
     normalize_minmax_0_100,
+    resolve_position_weights,
 )
 
 
@@ -30,6 +31,22 @@ def test_compute_raw_game_impact_uses_position_weights():
     out = compute_raw_game_impact(df, weights)
 
     assert out.tolist() == [8.4, 6.8]
+
+
+def test_resolve_position_weights_uses_supplied_weights():
+    df = pd.DataFrame(
+        {
+            "position": ["TOP", "TOP"],
+            "game_result": [1, 0],
+            "kills": [10, 1],
+        }
+    )
+    weights = pd.DataFrame({"TOP": {"kills": 1.0}})
+
+    out = resolve_position_weights(df, metrics=["kills"], position_weights=weights)
+
+    assert out.equals(weights)
+    assert out is not weights
 
 
 def test_normalize_minmax_0_100_scales_bounds():

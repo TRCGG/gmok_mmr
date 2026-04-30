@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from main_pipeline import add_basic_features
+from mmr_refactor.features import add_basic_features
 
 
 def test_add_basic_features_creates_rate_and_efficiency_columns():
