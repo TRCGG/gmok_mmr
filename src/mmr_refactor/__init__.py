@@ -10,7 +10,7 @@ from .game_impact import (
     compute_n_person_contribution,
     compute_vs_opponent,
 )
-from .mmr import update_mmr_elo, make_summary_df_wide
+from .mmr import update_mmr_elo, make_summary_df_wide, validate_mmr_input_matches
 
 __all__ = [
     "split_notebook_by_markdown_headers",
@@ -28,4 +28,5 @@ __all__ = [
     "compute_vs_opponent",
     "update_mmr_elo",
     "make_summary_df_wide",
+    "validate_mmr_input_matches",
 ]

@@ -86,3 +86,22 @@ def test_compute_vs_opponent_matches_same_game_and_position():
     assert scores["top_l"] == 30
     assert scores["jg_w"] == 40
     assert scores["jg_l"] == 60
+
+
+def test_compute_vs_opponent_preserves_original_index():
+    df = pd.DataFrame(
+        {
+            "replay_code": ["g1", "g1"],
+            "position": ["TOP", "TOP"],
+            "game_result": [1, 0],
+            "game_impact_winloss_norm": [65, 35],
+            "puuid": ["winner", "loser"],
+        },
+        index=[101, 205],
+    )
+
+    out = compute_vs_opponent(df)
+
+    assert out.index.tolist() == [101, 205]
+    assert out.loc[101] == 65
+    assert out.loc[205] == 35

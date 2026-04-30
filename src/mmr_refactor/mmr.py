@@ -39,6 +39,16 @@ DEFAULT_POSITIONS: tuple[str, ...] = (
     "TOP", "BOTTOM", "MIDDLE", "JUNGLE", "UTILITY",
 )
 
+REQUIRED_MMR_COLUMNS: tuple[str, ...] = (
+    "played_at",
+    "replay_code",
+    "puuid",
+    "position",
+    "game_result",
+    "game_impact_vs_opponent",
+    "game_n_person_contribution",
+)
+
 
 # ==============================================================
 # Helpers
@@ -75,6 +85,74 @@ def calculate_k_factor(mmr: float) -> float:
     if mmr > MMR_K_DECAY_START:
         k = 1.0 - ((mmr - MMR_K_DECAY_START) * MMR_K_DECAY_RATE)
     return max(k, MMR_K_MIN)
+
+
+def validate_mmr_input_matches(
+    df: pd.DataFrame,
+    positions: tuple[str, ...] = DEFAULT_POSITIONS,
+    expected_players_per_game: int = 10,
+) -> None:
+    """Validate match structure before MMR calculation.
+
+    Each match must contain exactly ten rows, exactly two rows per position,
+    and each position pair must contain one winner and one loser.
+    """
+    missing_cols = [c for c in REQUIRED_MMR_COLUMNS if c not in df.columns]
+    if missing_cols:
+        raise ValueError(f"MMR input is missing required columns: {missing_cols}")
+
+    if df.empty:
+        raise ValueError("MMR input is empty.")
+
+    game_counts = df.groupby("replay_code").size()
+    invalid_games = game_counts[game_counts != expected_players_per_game]
+    if not invalid_games.empty:
+        sample = invalid_games.head().to_dict()
+        raise ValueError(
+            "Invalid MMR input: each replay_code must contain "
+            f"{expected_players_per_game} rows. Invalid sample: {sample}"
+        )
+
+    invalid_results = df[~df["game_result"].isin([0, 1])]
+    if not invalid_results.empty:
+        sample = invalid_results[["replay_code", "puuid", "game_result"]].head().to_dict("records")
+        raise ValueError(f"Invalid MMR input: game_result must be 0 or 1. Invalid sample: {sample}")
+
+    duplicated_players = df[df.duplicated(["replay_code", "puuid"], keep=False)]
+    if not duplicated_players.empty:
+        sample = duplicated_players[["replay_code", "puuid"]].head().to_dict("records")
+        raise ValueError(f"Invalid MMR input: duplicated player rows in a match. Invalid sample: {sample}")
+
+    expected_index = pd.MultiIndex.from_product(
+        [df["replay_code"].dropna().unique(), positions],
+        names=["replay_code", "position"],
+    )
+
+    position_counts = (
+        df.groupby(["replay_code", "position"])
+        .size()
+        .reindex(expected_index, fill_value=0)
+    )
+    invalid_position_counts = position_counts[position_counts != 2]
+    if not invalid_position_counts.empty:
+        sample = invalid_position_counts.head().to_dict()
+        raise ValueError(
+            "Invalid MMR input: each replay_code/position pair must contain "
+            f"exactly 2 rows. Invalid sample: {sample}"
+        )
+
+    position_result_sums = (
+        df.groupby(["replay_code", "position"])["game_result"]
+        .sum()
+        .reindex(expected_index)
+    )
+    invalid_position_results = position_result_sums[position_result_sums != 1]
+    if not invalid_position_results.empty:
+        sample = invalid_position_results.head().to_dict()
+        raise ValueError(
+            "Invalid MMR input: each replay_code/position pair must contain "
+            f"one winner and one loser. Invalid sample: {sample}"
+        )
 
 
 # ==============================================================
@@ -177,6 +255,7 @@ def update_mmr_elo(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     Returns:
         (mmr_df_updated, summary_df_wide)
     """
+    validate_mmr_input_matches(df)
     df = df.sort_values(by=["played_at", "replay_code", "puuid"]).copy()
 
     player_pos_mmr: dict[str, dict[str, int]] = {}

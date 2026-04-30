@@ -208,6 +208,7 @@ def compute_vs_opponent(
     매칭되지 않은 row 는 NaN.
     """
     df_comp = df[[game_id_col, position_col, result_col, norm_col, puuid_col]].copy()
+    df_comp["_row_id"] = df.index
 
     merged = pd.merge(
         df_comp[df_comp[result_col] == 1],
@@ -230,12 +231,14 @@ def compute_vs_opponent(
     rows = []
     for _, r in merged.iterrows():
         rows.append({
+            "_row_id": r["_row_id_winner"],
             game_id_col: r[game_id_col],
             position_col: r[position_col],
             puuid_col: r[f"{puuid_col}_winner"],
             "game_impact_vs_opponent": r["winner_score"],
         })
         rows.append({
+            "_row_id": r["_row_id_loser"],
             game_id_col: r[game_id_col],
             position_col: r[position_col],
             puuid_col: r[f"{puuid_col}_loser"],
@@ -246,9 +249,10 @@ def compute_vs_opponent(
         return pd.Series(np.nan, index=df.index, name="game_impact_vs_opponent")
 
     vs_df = pd.DataFrame(rows)
-    merged_back = df[[game_id_col, position_col, puuid_col]].merge(
-        vs_df,
-        on=[game_id_col, position_col, puuid_col],
-        how="left",
+    return (
+        vs_df
+        .drop_duplicates(subset=["_row_id"])
+        .set_index("_row_id")
+        .reindex(df.index)["game_impact_vs_opponent"]
+        .rename("game_impact_vs_opponent")
     )
-    return merged_back["game_impact_vs_opponent"].rename("game_impact_vs_opponent")
