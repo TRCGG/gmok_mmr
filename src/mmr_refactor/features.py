@@ -32,16 +32,19 @@ BASE_METRICS = [
 def add_basic_features(df: pd.DataFrame) -> pd.DataFrame:
     """MMR 로직에서 사용할 DB 호환 파생 feature를 생성한다."""
     out = df.copy()
-    duration = out["game_duration"].replace(0, np.nan)
-    deaths = out["deaths"].replace(0, np.nan)
+    # 분 단위, 0 방지용 안전 처리
+    duration =(out["game_duration"] / 60).replace(0, np.nan)
+    # 0데스 방지용 안전 처리
+    deaths_safe = out["deaths"].replace(0, 1)
+
 
     out["gold_per_min"] = out["gold"] / duration
     out["dpm"] = out["damage_to_champions"] / duration
     out["damage_taken_per_min"] = out["damage_taken"] / duration
     out["cc_time_per_min"] = out["cc_time"] / duration
-    out["kda"] = (out["kills"] + out["assists"]) / deaths
-    out["damage_taken_per_death"] = out["damage_taken"] / deaths
-    out["damage_dealt_per_death"] = out["damage_to_champions"] / deaths
+    out["kda"] = (out["kills"] + out["assists"]) / deaths_safe
+    out["damage_taken_per_death"] = out["damage_taken"] / deaths_safe
+    out["damage_dealt_per_death"] = out["damage_to_champions"] / deaths_safe
 
     if "exp" in out.columns:
         out["exp_per_min"] = out["exp"] / duration
