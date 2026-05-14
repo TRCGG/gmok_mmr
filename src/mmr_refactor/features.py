@@ -33,7 +33,7 @@ def add_basic_features(df: pd.DataFrame) -> pd.DataFrame:
     """MMR 로직에서 사용할 DB 호환 파생 feature를 생성한다."""
     out = df.copy()
     # 분 단위, 0 방지용 안전 처리
-    duration =(out["game_duration"] / 60).replace(0, np.nan)
+    duration = out["game_duration"].replace(0, np.nan)
     # 0데스 방지용 안전 처리
     deaths_safe = out["deaths"].replace(0, 1)
 
