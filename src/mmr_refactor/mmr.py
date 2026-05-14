@@ -25,9 +25,9 @@ import pandas as pd
 BASE_WIN: int = 20
 BASE_LOSS: int = -15
 
-ALPHA: float = 0.6   # 媛쒖씤 湲곗뿬??諛섏쁺
-BETA: float = 0.4    # ?곷? ?ъ???鍮꾧탳 吏??諛섏쁺
-GAMMA: float = 0.2   # ELO 湲곕??깃낵 ?鍮??ㅼ젣?깃낵 諛섏쁺
+ALPHA: float = 0.6   # 개인 기여도 반영
+BETA: float = 0.4    # 상대 선수 대비 지표 반영
+GAMMA: float = 0.2   # ELO 기대 성과 대비 실제 성과 반영
 
 INITIAL_MMR: int = 1300
 MMR_MIN_CHANGE: int = -25
@@ -44,7 +44,7 @@ DEFAULT_POSITIONS: tuple[str, ...] = (
 
 @dataclass(frozen=True)
 class MMRSettings:
-    """MMR 怨꾩궛???ъ슜?섎뒗 議곗젙 媛?ν븳 ?ㅼ젙媛?"""
+    """MMR 계산에 사용하는 조정 가능한 설정값."""
 
     base_win: int = BASE_WIN
     base_loss: int = BASE_LOSS
@@ -74,11 +74,11 @@ REQUIRED_MMR_COLUMNS: tuple[str, ...] = (
 
 
 # ==============================================================
-# Helper ?⑥닔
+# Helper 함수
 # ==============================================================
 
 def expected_performance(mmr_a: float, mmr_b: float) -> float:
-    """ELO 湲곕? ?밸쪧."""
+    """ELO 기반 기대 승률."""
     return 1 / (1 + 10 ** ((mmr_b - mmr_a) / 400))
 
 
@@ -88,11 +88,11 @@ def calculate_personal_factor(
     f2_mean: float,
     settings: MMRSettings = DEFAULT_MMR_SETTINGS,
 ) -> float:
-    """媛쒖씤 湲곗뿬??factor.
+    """개인 기여도 factor.
 
-    - f1: game_n_person_contribution / ?됯퇏
-    - f2: game_impact_vs_opponent / ?됯퇏 (NaN ??1)
-    媛곴컖 [0.5, 2] 濡??대옩????(f1**ALPHA) * (f2**BETA).
+    - f1: game_n_person_contribution / 평균
+    - f2: game_impact_vs_opponent / 평균 (NaN이면 1)
+    각각 [0.5, 2]로 클램프한 뒤 (f1**ALPHA) * (f2**BETA)를 반환한다.
     """
     f1 = row["game_n_person_contribution"] / f1_mean if f1_mean != 0 else 1
 
@@ -111,7 +111,7 @@ def calculate_k_factor(
     mmr: float,
     settings: MMRSettings = DEFAULT_MMR_SETTINGS,
 ) -> float:
-    """MMR ???믪쓣?섎줉 ?먯닔 蹂?숉룺 異뺤냼 (>= MMR_K_MIN)."""
+    """MMR이 높을수록 점수 변동폭을 축소한다 (>= MMR_K_MIN)."""
     k = 1.0
     if mmr > settings.k_decay_start:
         k = 1.0 - ((mmr - settings.k_decay_start) * settings.k_decay_rate)
@@ -123,10 +123,10 @@ def validate_mmr_input_matches(
     positions: tuple[str, ...] = DEFAULT_POSITIONS,
     expected_players_per_game: int = 10,
 ) -> None:
-    """MMR 怨꾩궛 ?꾩뿉 寃쎄린 援ъ“瑜?寃利앺븳??
+    """MMR 계산 전에 경기 구조를 검증한다.
 
-    媛?寃쎄린???뺥솗??10媛?row瑜?媛?몄빞 ?섎ŉ, ?ъ??섎퀎濡??뺥솗??2媛?row?
-    ?뱀옄 1紐? ?⑥옄 1紐낆쓣 媛?몄빞 ?쒕떎.
+    각 경기는 정확히 10개 row를 가져야 하며, 포지션별로 정확히 2개 row와
+    승자 1명, 패자 1명을 가져야 한다.
     """
     missing_cols = [c for c in REQUIRED_MMR_COLUMNS if c not in df.columns]
     if missing_cols:
@@ -187,14 +187,14 @@ def validate_mmr_input_matches(
 
 
 # ==============================================================
-# Wide summary ?앹꽦
+# Wide summary 생성
 # ==============================================================
 
 def make_summary_df_wide(
     mmr_df_updated: pd.DataFrame,
     positions: tuple[str, ...] = DEFAULT_POSITIONS,
 ) -> pd.DataFrame:
-    """puuid 蹂?total_mmr / ?ъ??섎퀎 mmr쨌games쨌winrate 瑜?wide 濡??뺣━."""
+    """puuid별 total_mmr / 포지션별 mmr, games, winrate를 wide 형태로 정리한다."""
     pos_last = (
         mmr_df_updated
         .sort_values(by=["played_at", "replay_code"])
@@ -273,20 +273,20 @@ def make_summary_df_wide(
 
 
 # ==============================================================
-# 硫붿씤 MMR 媛깆떊 濡쒖쭅: ELO + 媛쒖씤 factor + ?곷? factor
+# 메인 MMR 갱신 로직: ELO + 개인 factor + 상대 factor
 # ==============================================================
 
 def update_mmr_elo(
     df: pd.DataFrame,
     settings: MMRSettings = DEFAULT_MMR_SETTINGS,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """寃뚯엫 ?⑥쐞濡??쒗쉶?섎ŉ (puuid x position) MMR ??媛깆떊?쒕떎.
+    """게임 단위로 순회하며 (puuid x position) MMR을 갱신한다.
 
-    NOTE: ?낅젰 df ??``played_at``, ``replay_code``, ``puuid``, ``position``,
+    NOTE: 입력 df에는 ``played_at``, ``replay_code``, ``puuid``, ``position``,
     ``game_result``, ``game_impact_vs_opponent``, ``game_n_person_contribution``
-    而щ읆???꾩슂?섎떎.
+    컬럼이 필요하다.
 
-    諛섑솚:
+    반환:
         (mmr_df_updated, summary_df_wide)
     """
     validate_mmr_input_matches(df, positions=settings.positions)
@@ -303,7 +303,7 @@ def update_mmr_elo(
         pre_mmr: dict[tuple[str, str], int] = {}
         game_updates = []
 
-        # 寃쎄린 ?쒖옉 ??MMR snapshot
+        # 경기 시작 전 MMR snapshot
         for _, row in game_df.iterrows():
             pid = row["puuid"]
             pos = row["position"]
@@ -316,7 +316,7 @@ def update_mmr_elo(
 
             pre_mmr[(pid, pos)] = int(player_pos_mmr[pid][pos])
 
-        # 媛??뚮젅?댁뼱 蹂?붾웾 怨꾩궛
+        # 각 플레이어의 변동량 계산
         for _, row in game_df.iterrows():
             pid = row["puuid"]
             pos = row["position"]
@@ -367,7 +367,7 @@ def update_mmr_elo(
 
             game_updates.append((pid, pos, row["game_result"], new_mmr, row_copy))
 
-        # 寃쎄린 寃곌낵 諛섏쁺
+        # 경기 결과 반영
         for pid, pos, result, new_mmr, row_copy in game_updates:
             player_pos_mmr[pid][pos] = new_mmr
             player_pos_record[pid][pos]["total"] += 1
