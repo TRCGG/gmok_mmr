@@ -60,7 +60,7 @@ class GameImpactBaseline:
 
 
 # =====================================================
-# 1) 포지션별 가중치(RandomForest feature importance)
+# 1) 포지션별 가중치(랜덤포레스트 중요도)
 # =====================================================
 
 def derive_position_weights(
@@ -150,7 +150,7 @@ def resolve_position_weights(
 
 
 # =====================================================
-# 2) Raw game impact(row 단위 가중합)
+# 2) 원본 game impact(row 단위 가중합)
 # =====================================================
 
 def compute_raw_game_impact(
@@ -184,7 +184,7 @@ def normalize_minmax_0_100(series: pd.Series) -> pd.Series:
 
 
 # =====================================================
-# 3) Position × win/loss 정규화 (game_impact_winloss_norm)
+# 3) 포지션 × 승패 정규화 (game_impact_winloss_norm)
 # =====================================================
 
 def normalize_by_position_outcome(

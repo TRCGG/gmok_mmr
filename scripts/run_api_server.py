@@ -1,4 +1,4 @@
-"""Run the MMR FastAPI server locally."""
+"""로컬에서 MMR FastAPI 서버를 실행한다."""
 
 from __future__ import annotations
 

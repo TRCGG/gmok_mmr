@@ -1,9 +1,9 @@
-"""Run the MMR pipeline from configured input to configured output.
+"""설정된 입력에서 출력 저장소까지 MMR 파이프라인을 실행한다.
 
-Default test mode:
+기본 테스트 모드:
     DB raw data -> MMR pipeline -> DB result tables
 
-Future service mode:
+향후 서비스 모드:
     Backend API raw data -> MMR pipeline -> Backend API result endpoint
 """
 
