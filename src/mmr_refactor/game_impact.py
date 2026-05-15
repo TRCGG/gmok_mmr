@@ -16,10 +16,47 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import MinMaxScaler, QuantileTransformer, StandardScaler
+
+
+@dataclass(frozen=True)
+class OutcomeNormalizationStats:
+    """단일 경기 raw impact 정규화에 사용하는 그룹별 기준값."""
+
+    lower: float
+    upper: float
+
+
+@dataclass(frozen=True)
+class GameImpactBaseline:
+    """단일 경기 Game Impact 계산에 필요한 고정 baseline."""
+
+    position_weights: pd.DataFrame
+    outcome_stats: dict[tuple[str, int], OutcomeNormalizationStats]
+
+    @classmethod
+    def from_history(
+        cls,
+        df: pd.DataFrame,
+        metrics: list[str],
+        position_weights: pd.DataFrame | None = None,
+    ) -> "GameImpactBaseline":
+        resolved_weights = resolve_position_weights(
+            df,
+            metrics=metrics,
+            position_weights=position_weights,
+        )
+        history_df = df.copy()
+        history_df["raw_game_impact"] = compute_raw_game_impact(history_df, resolved_weights)
+        return cls(
+            position_weights=resolved_weights,
+            outcome_stats=derive_outcome_normalization_stats(history_df),
+        )
 
 
 # =====================================================
@@ -201,6 +238,74 @@ def normalize_by_position_outcome(
 
             out.loc[valid_idx] = scaled.flatten()
 
+    return out
+
+
+def derive_outcome_normalization_stats(
+    df: pd.DataFrame,
+    raw_col: str = "raw_game_impact",
+    position_col: str = "position",
+    result_col: str = "game_result",
+    lower_quantile: float = 0.05,
+    upper_quantile: float = 0.95,
+) -> dict[tuple[str, int], OutcomeNormalizationStats]:
+    """이력 데이터에서 단일 경기 정규화에 사용할 position/result별 기준값을 만든다."""
+    stats: dict[tuple[str, int], OutcomeNormalizationStats] = {}
+
+    for (pos, result), group in df.groupby([position_col, result_col]):
+        values = group[raw_col].replace([np.inf, -np.inf], np.nan).dropna()
+        if values.empty:
+            continue
+
+        lower = float(values.quantile(lower_quantile))
+        upper = float(values.quantile(upper_quantile))
+        if np.isclose(lower, upper):
+            lower = float(values.min())
+            upper = float(values.max())
+        if np.isclose(lower, upper):
+            lower -= 0.5
+            upper += 0.5
+
+        stats[(pos, int(result))] = OutcomeNormalizationStats(lower=lower, upper=upper)
+
+    return stats
+
+
+def apply_outcome_normalization_stats(
+    df: pd.DataFrame,
+    outcome_stats: dict[tuple[str, int], OutcomeNormalizationStats],
+    raw_col: str = "raw_game_impact",
+    position_col: str = "position",
+    result_col: str = "game_result",
+) -> pd.Series:
+    """저장된 기준값으로 단일 경기 raw impact를 0~100 점수로 변환한다."""
+    values = []
+    for _, row in df.iterrows():
+        stats = outcome_stats.get((row[position_col], int(row[result_col])))
+        raw_value = row[raw_col]
+        if stats is None or pd.isna(raw_value):
+            values.append(np.nan)
+            continue
+
+        scaled = (raw_value - stats.lower) / (stats.upper - stats.lower) * 100
+        values.append(float(np.clip(scaled, 0, 100)))
+
+    return pd.Series(values, index=df.index, name="game_impact_winloss_norm")
+
+
+def apply_game_impact_baseline(
+    df: pd.DataFrame,
+    baseline: GameImpactBaseline,
+) -> pd.DataFrame:
+    """저장된 Game Impact baseline을 단일 경기 또는 신규 row 묶음에 적용한다."""
+    out = df.copy()
+    out["raw_game_impact"] = compute_raw_game_impact(out, baseline.position_weights)
+    out["game_impact_winloss_norm"] = apply_outcome_normalization_stats(
+        out,
+        baseline.outcome_stats,
+    )
+    out["game_n_person_contribution"] = compute_n_person_contribution(out)
+    out["game_impact_vs_opponent"] = compute_vs_opponent(out)
     return out
 
 

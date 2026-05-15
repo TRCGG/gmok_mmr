@@ -4,9 +4,14 @@ import numpy as np
 import pandas as pd
 
 from mmr_refactor.game_impact import (
+    GameImpactBaseline,
+    OutcomeNormalizationStats,
+    apply_game_impact_baseline,
+    apply_outcome_normalization_stats,
     compute_n_person_contribution,
     compute_raw_game_impact,
     compute_vs_opponent,
+    derive_outcome_normalization_stats,
     normalize_by_position_outcome,
     normalize_minmax_0_100,
     resolve_position_weights,
@@ -122,3 +127,66 @@ def test_compute_vs_opponent_preserves_original_index():
     assert out.index.tolist() == [101, 205]
     assert out.loc[101] == 65
     assert out.loc[205] == 35
+
+
+def test_apply_outcome_normalization_stats_uses_stored_bounds():
+    df = pd.DataFrame(
+        {
+            "position": ["TOP", "TOP"],
+            "game_result": [1, 0],
+            "raw_game_impact": [15, 30],
+        }
+    )
+    stats = {
+        ("TOP", 1): OutcomeNormalizationStats(lower=10, upper=20),
+        ("TOP", 0): OutcomeNormalizationStats(lower=20, upper=40),
+    }
+
+    out = apply_outcome_normalization_stats(df, stats)
+
+    assert out.tolist() == [50.0, 50.0]
+
+
+def test_apply_game_impact_baseline_builds_incremental_features():
+    df = pd.DataFrame(
+        {
+            "replay_code": ["g1", "g1"],
+            "position": ["TOP", "TOP"],
+            "game_result": [1, 0],
+            "kills": [10, 2],
+            "assists": [0, 0],
+            "puuid": ["winner", "loser"],
+        }
+    )
+    baseline = GameImpactBaseline(
+        position_weights=pd.DataFrame({"TOP": {"kills": 1.0, "assists": 0.0}}),
+        outcome_stats={
+            ("TOP", 1): OutcomeNormalizationStats(lower=0, upper=20),
+            ("TOP", 0): OutcomeNormalizationStats(lower=0, upper=20),
+        },
+    )
+
+    out = apply_game_impact_baseline(df, baseline)
+
+    assert out["game_impact_winloss_norm"].tolist() == [50.0, 10.0]
+    assert np.isclose(out["game_n_person_contribution"].sum(), 10)
+    assert np.allclose(
+        out["game_impact_vs_opponent"],
+        [83.33333333333334, 16.666666666666668],
+    )
+
+
+def test_derive_outcome_normalization_stats_returns_position_result_keys():
+    df = pd.DataFrame(
+        {
+            "position": ["TOP", "TOP", "TOP"],
+            "game_result": [1, 1, 0],
+            "raw_game_impact": [10, 20, 30],
+        }
+    )
+
+    stats = derive_outcome_normalization_stats(df)
+
+    assert ("TOP", 1) in stats
+    assert ("TOP", 0) in stats
+    assert stats[("TOP", 1)].lower < stats[("TOP", 1)].upper

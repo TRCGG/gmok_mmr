@@ -13,7 +13,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
@@ -61,6 +61,73 @@ class MMRSettings:
 
 
 DEFAULT_MMR_SETTINGS = MMRSettings()
+
+
+@dataclass(frozen=True)
+class MMRBaselineStats:
+    """MMR 변동 factor 계산에 사용하는 전체 기준 통계."""
+
+    f1_mean: float
+    f2_mean: float
+
+    @classmethod
+    def from_df(cls, df: pd.DataFrame) -> "MMRBaselineStats":
+        return cls(
+            f1_mean=float(df["game_n_person_contribution"].mean()),
+            f2_mean=float(df["game_impact_vs_opponent"].mean()),
+        )
+
+
+@dataclass
+class MMRRuntimeState:
+    """경기 순회 중 유지되는 플레이어별 포지션 MMR과 전적 상태."""
+
+    player_pos_mmr: dict[str, dict[str, int]] = field(default_factory=dict)
+    player_pos_record: dict[str, dict[str, dict[str, int]]] = field(default_factory=dict)
+
+    def ensure_player_position(
+        self,
+        pid: str,
+        pos: str,
+        settings: MMRSettings = DEFAULT_MMR_SETTINGS,
+    ) -> None:
+        self.player_pos_mmr.setdefault(pid, {})
+        self.player_pos_record.setdefault(pid, {})
+        self.player_pos_mmr[pid].setdefault(pos, settings.initial_mmr)
+        self.player_pos_record[pid].setdefault(pos, {"win": 0, "total": 0})
+
+    def get_pos_mmr(
+        self,
+        pid: str,
+        pos: str,
+        settings: MMRSettings = DEFAULT_MMR_SETTINGS,
+    ) -> int:
+        self.ensure_player_position(pid, pos, settings=settings)
+        return int(self.player_pos_mmr[pid][pos])
+
+    def apply_result(self, pid: str, pos: str, result: int, new_mmr: int) -> int:
+        self.player_pos_mmr[pid][pos] = int(new_mmr)
+        self.player_pos_record[pid][pos]["total"] += 1
+
+        if result == 1:
+            self.player_pos_record[pid][pos]["win"] += 1
+
+        return self.calculate_total_mmr(pid)
+
+    def calculate_total_mmr(self, pid: str) -> int:
+        pos_mmr = self.player_pos_mmr[pid]
+        pos_record = self.player_pos_record[pid]
+
+        weighted_sum = 0
+        total_games = 0
+        for pos in pos_mmr:
+            games = pos_record[pos]["total"]
+            weighted_sum += pos_mmr[pos] * games
+            total_games += games
+
+        if total_games == 0:
+            return DEFAULT_MMR_SETTINGS.initial_mmr
+        return int(round(weighted_sum / total_games))
 
 REQUIRED_MMR_COLUMNS: tuple[str, ...] = (
     "played_at",
@@ -276,6 +343,142 @@ def make_summary_df_wide(
 # 메인 MMR 갱신 로직: ELO + 개인 factor + 상대 factor
 # ==============================================================
 
+def _apply_mmr_game(
+    game_df: pd.DataFrame,
+    state: MMRRuntimeState,
+    baseline: MMRBaselineStats,
+    settings: MMRSettings = DEFAULT_MMR_SETTINGS,
+) -> list[pd.Series]:
+    """단일 경기 DataFrame을 현재 상태에 적용하고 갱신 row 목록을 반환한다."""
+    pre_mmr: dict[tuple[str, str], int] = {}
+    game_updates = []
+    updated_rows: list[pd.Series] = []
+
+    # 경기 시작 전 MMR snapshot
+    for _, row in game_df.iterrows():
+        pid = row["puuid"]
+        pos = row["position"]
+        pre_mmr[(pid, pos)] = state.get_pos_mmr(pid, pos, settings=settings)
+
+    # 각 플레이어의 변동량 계산
+    for _, row in game_df.iterrows():
+        pid = row["puuid"]
+        pos = row["position"]
+        current_mmr = pre_mmr[(pid, pos)]
+
+        opponent_df = game_df[
+            (game_df["position"] == pos) & (game_df["puuid"] != pid)
+        ]
+
+        opponent_mmr = settings.initial_mmr
+        if not opponent_df.empty:
+            opp_id = opponent_df.iloc[0]["puuid"]
+            opponent_mmr = pre_mmr.get((opp_id, pos), settings.initial_mmr)
+
+        expected = expected_performance(current_mmr, opponent_mmr)
+
+        actual = (
+            row["game_impact_vs_opponent"] / 100
+            if not pd.isna(row["game_impact_vs_opponent"])
+            else expected
+        )
+
+        relative_factor = actual / expected if expected > 0 else 1
+        personal_factor = calculate_personal_factor(
+            row,
+            baseline.f1_mean,
+            baseline.f2_mean,
+            settings=settings,
+        )
+        final_factor = personal_factor * (relative_factor ** settings.gamma)
+
+        k = calculate_k_factor(current_mmr, settings=settings)
+
+        if row["game_result"] == 1:
+            delta = settings.base_win * final_factor * k
+            delta = np.clip(max(delta, 12), 12, settings.max_change)
+        else:
+            delta = settings.base_loss * final_factor * k
+            delta = np.clip(min(delta, -12), settings.min_change, -12)
+
+        delta = int(round(delta))
+        new_mmr = int(current_mmr + delta)
+
+        row_copy = row.copy()
+        row_copy["pre_game_pos_mmr"] = int(current_mmr)
+        row_copy["expected_score"] = round(expected, 4)
+        row_copy["actual_score"] = round(actual, 4)
+        row_copy["relative_factor"] = round(relative_factor, 4)
+        row_copy["personal_factor"] = round(personal_factor, 4)
+        row_copy["final_factor"] = round(final_factor, 4)
+        row_copy["mmr_change"] = int(delta)
+        row_copy["pos_cumulative_mmr"] = int(new_mmr)
+
+        game_updates.append((pid, pos, row["game_result"], new_mmr, row_copy))
+
+    # 경기 결과 반영
+    for pid, pos, result, new_mmr, row_copy in game_updates:
+        row_copy["total_mmr"] = state.apply_result(pid, pos, int(result), new_mmr)
+        updated_rows.append(row_copy)
+
+    return updated_rows
+
+
+def update_mmr_matches(
+    df: pd.DataFrame,
+    state: MMRRuntimeState | None = None,
+    baseline: MMRBaselineStats | None = None,
+    settings: MMRSettings = DEFAULT_MMR_SETTINGS,
+    validate: bool = True,
+) -> pd.DataFrame:
+    """여러 경기를 시간순으로 적용하고 row 단위 MMR 결과를 반환한다."""
+    if validate:
+        validate_mmr_input_matches(df, positions=settings.positions)
+
+    df = df.sort_values(by=["played_at", "replay_code", "puuid"]).copy()
+    state = state or MMRRuntimeState()
+    baseline = baseline or MMRBaselineStats.from_df(df)
+
+    updated_rows: list[pd.Series] = []
+    for _, game_df in df.groupby("replay_code", sort=False):
+        updated_rows.extend(
+            _apply_mmr_game(
+                game_df,
+                state=state,
+                baseline=baseline,
+                settings=settings,
+            )
+        )
+
+    return pd.DataFrame(updated_rows)
+
+
+def update_single_match_mmr(
+    match_df: pd.DataFrame,
+    state: MMRRuntimeState,
+    baseline: MMRBaselineStats,
+    settings: MMRSettings = DEFAULT_MMR_SETTINGS,
+) -> pd.DataFrame:
+    """기존 상태에 단일 경기 하나를 적용하고 row 단위 MMR 결과를 반환한다."""
+    validate_mmr_input_matches(match_df, positions=settings.positions)
+    replay_codes = match_df["replay_code"].dropna().unique()
+    if len(replay_codes) != 1:
+        raise ValueError(
+            "Single match MMR input must contain exactly one replay_code. "
+            f"Got: {list(replay_codes)}"
+        )
+
+    match_df = match_df.sort_values(by=["played_at", "replay_code", "puuid"]).copy()
+    return pd.DataFrame(
+        _apply_mmr_game(
+            match_df,
+            state=state,
+            baseline=baseline,
+            settings=settings,
+        )
+    )
+
+
 def update_mmr_elo(
     df: pd.DataFrame,
     settings: MMRSettings = DEFAULT_MMR_SETTINGS,
@@ -289,108 +492,7 @@ def update_mmr_elo(
     반환:
         (mmr_df_updated, summary_df_wide)
     """
-    validate_mmr_input_matches(df, positions=settings.positions)
-    df = df.sort_values(by=["played_at", "replay_code", "puuid"]).copy()
-
-    player_pos_mmr: dict[str, dict[str, int]] = {}
-    player_pos_record: dict[str, dict[str, dict[str, int]]] = {}
-    updated_rows: list[pd.Series] = []
-
-    f1_mean = df["game_n_person_contribution"].mean()
-    f2_mean = df["game_impact_vs_opponent"].mean()
-
-    for _, game_df in df.groupby("replay_code", sort=False):
-        pre_mmr: dict[tuple[str, str], int] = {}
-        game_updates = []
-
-        # 경기 시작 전 MMR snapshot
-        for _, row in game_df.iterrows():
-            pid = row["puuid"]
-            pos = row["position"]
-
-            player_pos_mmr.setdefault(pid, {})
-            player_pos_record.setdefault(pid, {})
-
-            player_pos_mmr[pid].setdefault(pos, settings.initial_mmr)
-            player_pos_record[pid].setdefault(pos, {"win": 0, "total": 0})
-
-            pre_mmr[(pid, pos)] = int(player_pos_mmr[pid][pos])
-
-        # 각 플레이어의 변동량 계산
-        for _, row in game_df.iterrows():
-            pid = row["puuid"]
-            pos = row["position"]
-            current_mmr = pre_mmr[(pid, pos)]
-
-            opponent_df = game_df[
-                (game_df["position"] == pos) & (game_df["puuid"] != pid)
-            ]
-
-            opponent_mmr = settings.initial_mmr
-            if not opponent_df.empty:
-                opp_id = opponent_df.iloc[0]["puuid"]
-                opponent_mmr = pre_mmr.get((opp_id, pos), settings.initial_mmr)
-
-            expected = expected_performance(current_mmr, opponent_mmr)
-
-            actual = (
-                row["game_impact_vs_opponent"] / 100
-                if not pd.isna(row["game_impact_vs_opponent"])
-                else expected
-            )
-
-            relative_factor = actual / expected if expected > 0 else 1
-            personal_factor = calculate_personal_factor(row, f1_mean, f2_mean, settings=settings)
-            final_factor = personal_factor * (relative_factor ** settings.gamma)
-
-            k = calculate_k_factor(current_mmr, settings=settings)
-
-            if row["game_result"] == 1:
-                delta = settings.base_win * final_factor * k
-                delta = np.clip(max(delta, 12), 12, settings.max_change)
-            else:
-                delta = settings.base_loss * final_factor * k
-                delta = np.clip(min(delta, -12), settings.min_change, -12)
-
-            delta = int(round(delta))
-            new_mmr = int(current_mmr + delta)
-
-            row_copy = row.copy()
-            row_copy["pre_game_pos_mmr"] = int(current_mmr)
-            row_copy["expected_score"] = round(expected, 4)
-            row_copy["actual_score"] = round(actual, 4)
-            row_copy["relative_factor"] = round(relative_factor, 4)
-            row_copy["personal_factor"] = round(personal_factor, 4)
-            row_copy["final_factor"] = round(final_factor, 4)
-            row_copy["mmr_change"] = int(delta)
-            row_copy["pos_cumulative_mmr"] = int(new_mmr)
-
-            game_updates.append((pid, pos, row["game_result"], new_mmr, row_copy))
-
-        # 경기 결과 반영
-        for pid, pos, result, new_mmr, row_copy in game_updates:
-            player_pos_mmr[pid][pos] = new_mmr
-            player_pos_record[pid][pos]["total"] += 1
-
-            if result == 1:
-                player_pos_record[pid][pos]["win"] += 1
-
-            pos_mmr = player_pos_mmr[pid]
-            pos_record = player_pos_record[pid]
-
-            weighted_sum = 0
-            total_games = 0
-            for p in pos_mmr:
-                g = pos_record[p]["total"]
-                weighted_sum += pos_mmr[p] * g
-                total_games += g
-
-            total_mmr = int(round(weighted_sum / total_games)) if total_games > 0 else settings.initial_mmr
-
-            row_copy["total_mmr"] = total_mmr
-            updated_rows.append(row_copy)
-
-    mmr_df_updated = pd.DataFrame(updated_rows)
+    mmr_df_updated = update_mmr_matches(df, settings=settings)
     summary_df = make_summary_df_wide(mmr_df_updated, positions=settings.positions)
 
     return mmr_df_updated, summary_df

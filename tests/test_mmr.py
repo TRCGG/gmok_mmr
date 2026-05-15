@@ -6,11 +6,15 @@ import pytest
 
 from mmr_refactor.mmr import (
     DEFAULT_MMR_SETTINGS,
+    MMRBaselineStats,
+    MMRRuntimeState,
     MMRSettings,
     calculate_k_factor,
     expected_performance,
     make_summary_df_wide,
     update_mmr_elo,
+    update_mmr_matches,
+    update_single_match_mmr,
     validate_mmr_input_matches,
 )
 
@@ -99,6 +103,37 @@ def test_update_mmr_elo_accepts_custom_settings():
     updated, _ = update_mmr_elo(_valid_mmr_input(), settings=settings)
 
     assert updated["pre_game_pos_mmr"].eq(settings.initial_mmr).all()
+
+
+def test_update_mmr_matches_matches_update_mmr_elo_rows():
+    df = _valid_mmr_input()
+
+    updated_from_core = update_mmr_matches(df)
+    updated_from_public, _ = update_mmr_elo(df)
+
+    pd.testing.assert_frame_equal(
+        updated_from_core.reset_index(drop=True),
+        updated_from_public.reset_index(drop=True),
+    )
+
+
+def test_update_single_match_mmr_uses_runtime_state_and_baseline():
+    df = _valid_mmr_input()
+    state = MMRRuntimeState()
+    baseline = MMRBaselineStats.from_df(df)
+
+    single_updated = update_single_match_mmr(df, state=state, baseline=baseline)
+    full_updated, _ = update_mmr_elo(df)
+
+    pd.testing.assert_frame_equal(
+        single_updated.reset_index(drop=True),
+        full_updated.reset_index(drop=True),
+    )
+    assert state.player_pos_record["top_winner"]["TOP"]["total"] == 1
+    assert state.player_pos_mmr["top_winner"]["TOP"] == single_updated.loc[
+        single_updated["puuid"] == "top_winner",
+        "pos_cumulative_mmr",
+    ].item()
 
 
 def test_make_summary_df_wide_contains_position_columns():

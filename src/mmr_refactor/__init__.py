@@ -4,6 +4,11 @@ from .data_writer import save_mmr_results
 from .features import BASE_METRICS, add_basic_features, select_available_metrics
 from .silver import clean_match_data, find_rows_with_na
 from .game_impact import (
+    GameImpactBaseline,
+    OutcomeNormalizationStats,
+    apply_game_impact_baseline,
+    apply_outcome_normalization_stats,
+    derive_outcome_normalization_stats,
     derive_position_weights,
     resolve_position_weights,
     compute_raw_game_impact,
@@ -14,8 +19,12 @@ from .game_impact import (
 )
 from .mmr import (
     DEFAULT_MMR_SETTINGS,
+    MMRBaselineStats,
+    MMRRuntimeState,
     MMRSettings,
     update_mmr_elo,
+    update_mmr_matches,
+    update_single_match_mmr,
     make_summary_df_wide,
     validate_mmr_input_matches,
 )
@@ -31,6 +40,11 @@ __all__ = [
     "select_available_metrics",
     "clean_match_data",
     "find_rows_with_na",
+    "GameImpactBaseline",
+    "OutcomeNormalizationStats",
+    "apply_game_impact_baseline",
+    "apply_outcome_normalization_stats",
+    "derive_outcome_normalization_stats",
     "derive_position_weights",
     "resolve_position_weights",
     "compute_raw_game_impact",
@@ -39,8 +53,12 @@ __all__ = [
     "compute_n_person_contribution",
     "compute_vs_opponent",
     "DEFAULT_MMR_SETTINGS",
+    "MMRBaselineStats",
+    "MMRRuntimeState",
     "MMRSettings",
     "update_mmr_elo",
+    "update_mmr_matches",
+    "update_single_match_mmr",
     "make_summary_df_wide",
     "validate_mmr_input_matches",
 ]
