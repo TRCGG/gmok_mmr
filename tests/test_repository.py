@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import inspect
+from pathlib import Path
 
 from mmr_refactor import data_loader
 from mmr_refactor import repository
+from mmr_refactor.db_test import baseline_repository
 
 
 def test_sql_is_owned_by_repository_module():
@@ -31,3 +33,30 @@ def test_raw_match_sql_selects_original_mmr_metric_source_columns():
 
     for column in expected_columns:
         assert column in repository_source
+
+
+def test_db_test_module_owns_temporary_baseline_storage_sql():
+    repository_source = inspect.getsource(repository)
+    baseline_repository_source = inspect.getsource(baseline_repository)
+
+    assert "mmr_baselines" not in repository_source
+    assert "DB 테스트" in baseline_repository_source
+    assert "INSERT INTO {table_name}" in baseline_repository_source
+    assert "ON CONFLICT (season, baseline_version) DO UPDATE" in baseline_repository_source
+    assert "is_active = true" in baseline_repository_source
+    assert "CAST(:mmr_baseline AS jsonb)" in baseline_repository_source
+
+
+def test_full_mmr_db_test_script_loads_baseline_before_calculation():
+    script_path = (
+        Path(__file__).resolve().parents[1]
+        / "scripts"
+        / "db_test"
+        / "calculate_full_mmr_with_db_baseline.py"
+    )
+    script_source = script_path.read_text(encoding="utf-8")
+
+    assert "DB 테스트용 전체 MMR 계산 스크립트" in script_source
+    assert "load_mmr_baseline_from_db_test" in script_source
+    assert "calculate_full_mmr" in script_source
+    assert "--save-results" in script_source

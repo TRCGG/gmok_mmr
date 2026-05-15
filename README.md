@@ -106,6 +106,17 @@ DB에서 raw 데이터를 읽고 계산 결과를 DB에 저장합니다.
 python scripts/main_pipeline.py --source db --sink db
 ```
 
+백엔드 baseline 저장 API가 준비되기 전에는 DB 테스트 전용 경로를 사용합니다.
+아래 migration과 script는 운영 경로가 아니며, 백엔드 연동 후 삭제하거나 분리합니다.
+
+```bash
+psql -d <DB_NAME> -f migrations/db_test/001_create_mmr_baselines.sql
+python scripts/db_test/calculate_baseline_db.py --season 2026-S1 --baseline-version 2026-06
+python scripts/db_test/calculate_full_mmr_with_db_baseline.py --season 2026-S1 --baseline-version 2026-06
+```
+
+결과 테이블까지 저장하려면 전체 MMR 계산 명령에 `--save-results`를 추가합니다.
+
 기본값은 `.env`의 `MMR_DATA_SOURCE`, `MMR_RESULT_SINK`를 따릅니다.
 
 ## 테스트
