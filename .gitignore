@@ -15,6 +15,7 @@ venv/
 .DS_Store
 
 # Output artifacts
+output/
 *.xlsx
 *.png
 pytest-cache-files-*/
