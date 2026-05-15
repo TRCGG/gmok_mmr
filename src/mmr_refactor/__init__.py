@@ -3,6 +3,11 @@ from .data_loader import load_match_dataframe, load_user_name_dataframe
 from .data_writer import save_mmr_results
 from .features import BASE_METRICS, add_basic_features, select_available_metrics
 from .silver import clean_match_data, find_rows_with_na
+from .baseline import (
+    ServiceBaseline,
+    calculate_service_baseline,
+    service_baseline_to_payload,
+)
 from .game_impact import (
     GameImpactBaseline,
     OutcomeNormalizationStats,
@@ -40,6 +45,9 @@ __all__ = [
     "select_available_metrics",
     "clean_match_data",
     "find_rows_with_na",
+    "ServiceBaseline",
+    "calculate_service_baseline",
+    "service_baseline_to_payload",
     "GameImpactBaseline",
     "OutcomeNormalizationStats",
     "apply_game_impact_baseline",
