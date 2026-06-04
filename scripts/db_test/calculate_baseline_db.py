@@ -19,7 +19,7 @@ if str(SRC) not in sys.path:
 
 from mmr_refactor.baseline import calculate_service_baseline, service_baseline_to_payload
 from mmr_refactor.db_test.baseline_repository import save_mmr_baseline_to_db_test
-from mmr_refactor.repository import load_match_dataframe_from_db
+from mmr_refactor.db_test.repository import load_match_dataframe_from_db
 from mmr_refactor.service import build_base_feature_dataframe
 
 

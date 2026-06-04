@@ -19,7 +19,7 @@ from .config import (
     get_api_token,
     get_data_source,
 )
-from .repository import (
+from .db_test.repository import (
     load_match_dataframe_from_db,
     load_user_name_dataframe_from_db,
 )

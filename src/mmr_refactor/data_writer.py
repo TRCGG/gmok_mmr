@@ -16,7 +16,7 @@ from .config import (
     get_api_token,
     get_result_sink,
 )
-from .repository import save_mmr_results_to_db
+from .db_test.repository import save_mmr_results_to_db
 
 
 def save_mmr_results(

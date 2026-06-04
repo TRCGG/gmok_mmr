@@ -9,18 +9,16 @@
 from __future__ import annotations
 
 import json
-import os
-import re
 from typing import Any
 
 from sqlalchemy import create_engine, text
 
-from mmr_refactor.config import get_db_url
+from .config import get_db_url, get_mmr_baseline_table
 
 
 def get_db_test_mmr_baseline_table() -> str:
     """임시 DB 테스트용 baseline 테이블명을 반환한다."""
-    return _safe_sql_identifier(os.environ.get("MMR_BASELINE_TABLE", "mmr_baselines"))
+    return get_mmr_baseline_table()
 
 
 def save_mmr_baseline_to_db_test(
@@ -152,11 +150,4 @@ def _coerce_json(value: Any) -> Any:
     """DB driver가 문자열로 반환한 JSON 값을 Python 객체로 복원한다."""
     if isinstance(value, str):
         return json.loads(value)
-    return value
-
-
-def _safe_sql_identifier(value: str) -> str:
-    """SQL 보간 전에 단순 테이블 식별자 형식인지 검증한다."""
-    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", value):
-        raise ValueError(f"Unsafe SQL identifier: {value!r}")
     return value

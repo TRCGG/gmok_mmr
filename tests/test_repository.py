@@ -4,8 +4,8 @@ import inspect
 from pathlib import Path
 
 from mmr_refactor import data_loader
-from mmr_refactor import repository
 from mmr_refactor.db_test import baseline_repository
+from mmr_refactor.db_test import repository
 
 
 def test_sql_is_owned_by_repository_module():

@@ -27,7 +27,7 @@ if str(SRC) not in sys.path:
 
 from mmr_refactor.data_writer import save_mmr_results
 from mmr_refactor.db_test.baseline_repository import load_mmr_baseline_from_db_test
-from mmr_refactor.repository import load_match_dataframe_from_db
+from mmr_refactor.db_test.repository import load_match_dataframe_from_db
 from mmr_refactor.service import calculate_full_mmr
 
 
