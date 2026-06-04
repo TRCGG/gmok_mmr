@@ -30,7 +30,7 @@ from .mmr import (
     update_mmr_matches,
     update_single_match_mmr,
 )
-from .silver import clean_match_data
+from .silver import clean_match_data, drop_invalid_matches
 
 
 def calculate_baseline_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -133,6 +133,9 @@ def build_base_feature_dataframe(raw_df: pd.DataFrame) -> pd.DataFrame:
     """API raw match row를 기본 feature DataFrame으로 변환한다."""
     raw_df = _normalize_source_columns(raw_df)
     clean_df = clean_match_data(raw_df, convert_duration_to_minutes=True)
+    clean_df = drop_invalid_matches(clean_df)
+    if clean_df.empty:
+        raise RuntimeError("유효한 경기가 없습니다. 모든 경기가 5v5 구조 검증에서 제외되었습니다.")
     return add_basic_features(clean_df)
 
 

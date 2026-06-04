@@ -18,10 +18,15 @@ from .config import (
 )
 
 
-def load_match_dataframe_from_db() -> pd.DataFrame:
-    """PostgreSQL에서 원천 player-game 레코드를 읽는다."""
+def load_match_dataframe_from_db(guild_id: str | None = None) -> pd.DataFrame:
+    """PostgreSQL에서 원천 player-game 레코드를 읽는다.
+
+    Args:
+        guild_id: 지정 시 해당 guild의 경기만 읽는다. None이면 전체.
+    """
     engine = create_engine(get_db_url())
     player_game_table = get_player_game_table()
+    where_clause = "WHERE pg.guild_id = :guild_id" if guild_id is not None else ""
 
     query = text(
         f"""
@@ -86,11 +91,13 @@ def load_match_dataframe_from_db() -> pd.DataFrame:
             pg.created_at                                   AS created_at,
             pg.played_at                                   AS played_at
         FROM {player_game_table} pg
+        {where_clause}
         """
     )
 
+    params = {"guild_id": guild_id} if guild_id is not None else {}
     with engine.connect() as conn:
-        return pd.read_sql(query, conn)
+        return pd.read_sql(query, conn, params=params)
 
 
 def load_user_name_dataframe_from_db() -> pd.DataFrame:

@@ -63,3 +63,48 @@ def find_rows_with_na(
     drop_cols = [c for c in na_exclude_cols if c in df.columns]
     check_df = df.drop(columns=drop_cols)
     return df[check_df.isnull().any(axis=1)]
+
+
+def drop_invalid_matches(
+    df: pd.DataFrame,
+    positions: tuple[str, ...] = ("TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"),
+    replay_code_col: str = "replay_code",
+    position_col: str = "position",
+    result_col: str = "game_result",
+    expected_players: int = 10,
+) -> pd.DataFrame:
+    """5v5 구조가 맞지 않는 경기를 통째로 제거한다.
+
+    제거 조건 (하나라도 해당하면 해당 replay_code 전체 drop):
+        1. 경기 총 row 수가 expected_players(10)가 아님
+        2. 포지션당 row 수가 정확히 2가 아님
+        3. 포지션당 승자 1명 + 패자 1명 구조가 아님
+    """
+    if df.empty:
+        return df
+
+    invalid_codes: set[str] = set()
+
+    game_counts = df.groupby(replay_code_col).size()
+    invalid_codes.update(
+        game_counts[game_counts != expected_players].index.tolist()
+    )
+
+    pos_counts = df.groupby([replay_code_col, position_col]).size()
+    invalid_codes.update(
+        pos_counts[pos_counts != 2].reset_index()[replay_code_col].tolist()
+    )
+
+    if result_col in df.columns:
+        pos_result_sums = df.groupby([replay_code_col, position_col])[result_col].sum()
+        invalid_codes.update(
+            pos_result_sums[pos_result_sums != 1].reset_index()[replay_code_col].tolist()
+        )
+
+    if invalid_codes:
+        print(
+            f"[drop_invalid_matches] 유효하지 않은 경기 {len(invalid_codes)}건 제외: "
+            + ", ".join(sorted(invalid_codes))
+        )
+
+    return df[~df[replay_code_col].isin(invalid_codes)].copy()

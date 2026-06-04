@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 import sys
 
@@ -28,6 +29,7 @@ if str(SRC) not in sys.path:
 from mmr_refactor.data_writer import save_mmr_results
 from mmr_refactor.db_test.baseline_repository import load_mmr_baseline_from_db_test
 from mmr_refactor.db_test.repository import load_match_dataframe_from_db
+from mmr_refactor.db_test.run_logger import MMRTestRunLogger
 from mmr_refactor.service import calculate_full_mmr
 
 
@@ -40,35 +42,47 @@ def main() -> None:
     parser.add_argument("--save-results", action="store_true")
     args = parser.parse_args()
 
+    source_table = os.environ.get("MMR_PLAYER_GAME_TABLE", "player_game")
+
     baseline_payload = load_mmr_baseline_from_db_test(
         season=args.season,
         baseline_version=args.baseline_version,
         active_only=args.baseline_version is None,
     )
 
-    raw_df = load_match_dataframe_from_db()
-    if args.guild_id is not None:
-        raw_df = raw_df[raw_df["guild_id"].astype(str) == str(args.guild_id)].copy()
-    if raw_df.empty:
-        raise RuntimeError("No player-game rows found for full MMR DB test.")
+    with MMRTestRunLogger(
+        script_name="calculate_full_mmr_with_db_baseline",
+        season=args.season,
+        baseline_version=baseline_payload["baseline_version"],
+        source_table=source_table,
+    ) as logger:
+        raw_df = load_match_dataframe_from_db(guild_id=args.guild_id)
+        if raw_df.empty:
+            raise RuntimeError("No player-game rows found for full MMR DB test.")
 
-    result = calculate_full_mmr(
-        {
-            "calculation_id": args.calculation_id,
-            "guild_id": args.guild_id,
-            "season": args.season,
-            "baseline_version": baseline_payload["baseline_version"],
-            "mmr_baseline": baseline_payload["mmr_baseline"],
-            "game_impact_baseline": baseline_payload["game_impact_baseline"],
-            "matches": raw_df.to_dict(orient="records"),
-        }
-    )
+        result = calculate_full_mmr(
+            {
+                "calculation_id": args.calculation_id,
+                "guild_id": args.guild_id,
+                "season": args.season,
+                "baseline_version": baseline_payload["baseline_version"],
+                "mmr_baseline": baseline_payload["mmr_baseline"],
+                "game_impact_baseline": baseline_payload["game_impact_baseline"],
+                "matches": raw_df.to_dict(orient="records"),
+            }
+        )
 
-    match_results = pd.DataFrame(result["match_results"])
-    user_summary = pd.DataFrame(result["user_summary"])
+        match_results = pd.DataFrame(result["match_results"])
+        user_summary = pd.DataFrame(result["user_summary"])
 
-    if args.save_results:
-        save_mmr_results(match_results, user_summary, sink="db")
+        logger.set_counts(
+            match_count=result["metadata"]["match_count"],
+            player_game_row_count=result["metadata"]["player_game_row_count"],
+            user_count=len(user_summary),
+        )
+
+        if args.save_results:
+            save_mmr_results(match_results, user_summary, sink="db")
 
     print(
         "Calculated DB test full MMR "

@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 import sys
 
@@ -20,6 +21,7 @@ if str(SRC) not in sys.path:
 from mmr_refactor.baseline import calculate_service_baseline, service_baseline_to_payload
 from mmr_refactor.db_test.baseline_repository import save_mmr_baseline_to_db_test
 from mmr_refactor.db_test.repository import load_match_dataframe_from_db
+from mmr_refactor.db_test.run_logger import MMRTestRunLogger
 from mmr_refactor.service import build_base_feature_dataframe
 
 
@@ -27,22 +29,36 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--season", required=True)
     parser.add_argument("--baseline-version", required=True)
+    parser.add_argument("--guild-id", default=None)
     parser.add_argument("--inactive", action="store_true")
     args = parser.parse_args()
 
-    raw_df = load_match_dataframe_from_db()
-    feature_df = build_base_feature_dataframe(raw_df)
-    baseline = calculate_service_baseline(
-        feature_df,
-        baseline_version=args.baseline_version,
+    source_table = os.environ.get("MMR_PLAYER_GAME_TABLE", "player_game")
+
+    with MMRTestRunLogger(
+        script_name="calculate_baseline_db",
         season=args.season,
-    )
-    payload = service_baseline_to_payload(
-        baseline,
-        match_count=feature_df["replay_code"].nunique(),
-        player_game_row_count=len(feature_df),
-    )
-    save_mmr_baseline_to_db_test(payload, is_active=not args.inactive)
+        baseline_version=args.baseline_version,
+        source_table=source_table,
+    ) as logger:
+        raw_df = load_match_dataframe_from_db(guild_id=args.guild_id)
+        feature_df = build_base_feature_dataframe(raw_df)
+        baseline = calculate_service_baseline(
+            feature_df,
+            baseline_version=args.baseline_version,
+            season=args.season,
+        )
+        payload = service_baseline_to_payload(
+            baseline,
+            match_count=feature_df["replay_code"].nunique(),
+            player_game_row_count=len(feature_df),
+        )
+        save_mmr_baseline_to_db_test(payload, is_active=not args.inactive)
+
+        logger.set_counts(
+            match_count=payload["metadata"]["match_count"],
+            player_game_row_count=payload["metadata"]["player_game_row_count"],
+        )
 
     print(
         "Saved DB test baseline "
