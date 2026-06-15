@@ -297,17 +297,41 @@ def apply_game_impact_baseline(
     df: pd.DataFrame,
     baseline: GameImpactBaseline,
 ) -> pd.DataFrame:
-    """저장된 Game Impact baseline을 단일 경기 또는 신규 row 묶음에 적용한다."""
     out = df.copy()
-    out["raw_game_impact"] = compute_raw_game_impact(out, baseline.position_weights)
-    out["game_impact_winloss_norm"] = apply_outcome_normalization_stats(
-        out,
-        baseline.outcome_stats,
-    )
-    out["game_n_person_contribution"] = compute_n_person_contribution(out)
-    out["game_impact_vs_opponent"] = compute_vs_opponent(out)
-    return out
 
+    # 1. Raw Impact
+    out["raw_game_impact"] = compute_raw_game_impact(
+        out,
+        baseline.position_weights,
+    )
+
+    # 2. game_impact 추가
+    # 기존 노트북:
+    # MinMaxScaler(feature_range=(0,100))
+    out["game_impact"] = normalize_minmax_0_100(
+        out["raw_game_impact"]
+    )
+
+    # 3. 승패 + 포지션별 정규화
+    # 기존 노트북 방식 사용
+    out["game_impact_winloss_norm"] = normalize_by_position_outcome(
+        out,
+        raw_col="raw_game_impact",
+        position_col="position",
+        result_col="game_result",
+    )
+
+    # 4. 인분
+    out["game_n_person_contribution"] = (
+        compute_n_person_contribution(out)
+    )
+
+    # 5. 상대 비교
+    out["game_impact_vs_opponent"] = (
+        compute_vs_opponent(out)
+    )
+
+    return out
 
 # =====================================================
 # 4) 인분 / 상대 비교
