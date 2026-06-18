@@ -313,9 +313,12 @@ def apply_game_impact_baseline(
     )
 
     # 3. 승패 + 포지션별 정규화
-    # 기존 노트북 방식 사용
-    out["game_impact_winloss_norm"] = normalize_by_position_outcome(
+    # 미리 계산한 baseline의 outcome_stats(저장된 lower/upper)를 그대로 적용한다.
+    # 계산 중에 분위수를 다시 구하는 옛날 방식 대신, 사전 baseline 기준을 사용해야
+    # 전체(RECALC)와 단일 경기 증분 결과가 동일하게 유지된다.
+    out["game_impact_winloss_norm"] = apply_outcome_normalization_stats(
         out,
+        baseline.outcome_stats,
         raw_col="raw_game_impact",
         position_col="position",
         result_col="game_result",

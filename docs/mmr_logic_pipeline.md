@@ -132,18 +132,27 @@ raw_game_impact = Σ (metric_value × position_weight[metric])
 
 `raw_game_impact` 전체를 `MinMaxScaler(0~100)`로 스케일. (현재 MMR 변동에는 직접 안 쓰이고, 표시/분석용)
 
-### 4-4. game_impact_winloss_norm — `normalize_by_position_outcome`
+### 4-4. game_impact_winloss_norm — 정규화 (경로별 2가지)
 
-**(position × game_result) 그룹별**로 `raw_game_impact`를 정규화한다. 승자끼리, 패자끼리 분리해 상대 비교의 기준을 만든다.
+(position × game_result) 그룹별로 `raw_game_impact`를 0~100으로 정규화한다. 승자끼리, 패자끼리 분리해 상대 비교의 기준을 만든다. 이 컬럼이 이후 인분/상대비교의 **기반 점수**다.
 
+**(A) baseline 적용 경로 — 운영 기본** (`apply_game_impact_baseline` → `apply_outcome_normalization_stats`)
+
+미리 계산해 저장한 baseline의 `outcome_stats`(그룹별 `lower`/`upper`)를 그대로 적용한다.
+```text
+(raw - lower) / (upper - lower) × 100   → [0, 100] 클립
+```
+- `outcome_stats`는 baseline 생성 시 이력 데이터의 5/95 분위로 미리 산출(`derive_outcome_normalization_stats`).
+- **전체(RECALC)와 단일 경기 증분이 같은 기준을 써서 결과가 일치한다.** `calculate_full_mmr`, `calculate_single_match_mmr`, baseline f1/f2 계산이 모두 이 경로.
+
+**(B) baseline 없는 레거시 경로** (`normalize_by_position_outcome`)
+
+baseline을 전달하지 않는 옛날 배치(`tests/cli/main_pipeline.py`) 전용. 현재 데이터에서 그룹별로 즉석 정규화한다.
 ```text
 각 (position, win/loss) 그룹:
-  QuantileTransformer(output_distribution="normal", n_quantiles=min(n,1000))
-  → MinMaxScaler(0~100)
+  QuantileTransformer(output_distribution="normal", n_quantiles=min(n,1000)) → MinMaxScaler(0~100)
 ```
-그룹 표본이 2개 미만이면 `NaN`(경고 출력). 이 컬럼이 이후 인분/상대비교의 **기반 점수**다.
-
-> **증분(baseline) 경로**는 대신 `derive_outcome_normalization_stats`(이력 데이터의 5/95 분위)로 만든 `(lower, upper)` 기준을 `apply_outcome_normalization_stats`로 적용해 `(raw - lower)/(upper - lower) × 100`을 0~100 클립. 단일 경기엔 그룹 분포가 없으므로 저장된 기준을 쓰는 것.
+그룹 표본이 2개 미만이면 `NaN`(경고 출력). 단일 경기엔 그룹 분포가 없어 NaN이 되므로, 운영은 반드시 (A) 경로를 쓴다.
 
 ### 4-5. game_n_person_contribution (인분) — `compute_n_person_contribution`
 
