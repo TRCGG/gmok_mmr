@@ -45,18 +45,33 @@ raw match rows
 ├── docs/                           # 작업 로그, 로직 리뷰, 통합 로직 참고 문서
 ├── migrations/                     # DB DDL migration
 ├── scripts/
-│   └── main_pipeline.py            # 실행 진입점
-├── src/mmr_refactor/
-│   ├── config.py                   # env 기반 설정
-│   ├── data_loader.py              # DB/API raw 데이터 로딩 라우터
-│   ├── data_writer.py              # DB/API 결과 저장 라우터
-│   ├── features.py                 # 파생 feature 생성, metric 목록
-│   ├── game_impact.py              # Game Impact 계산
-│   ├── mmr.py                      # ELO 기반 MMR 계산
-│   ├── repository.py               # DB SQL read/write
-│   └── silver.py                   # 기본 정제
-└── tests/                          # 단위 테스트
+│   └── run_api_server.py           # 운영 API 서버 실행
+├── src/mmr/                        # 운영 패키지 (계산 + API, DB 의존 없음)
+│   ├── silver/                     # 정제 · 파생 feature · Game Impact
+│   │   ├── cleaning.py             # 기본 정제 (clean/drop)
+│   │   ├── features.py             # 파생 feature, metric 목록
+│   │   └── game_impact.py          # Game Impact 계산
+│   ├── gold/                       # baseline · ELO MMR 계산
+│   │   ├── baseline.py             # baseline 조립/직렬화
+│   │   └── mmr.py                  # ELO 기반 MMR 계산/요약
+│   └── serving/                    # API 계층
+│       ├── service.py              # 계산 서비스 함수
+│       ├── api_server.py           # FastAPI 엔드포인트
+│       └── schemas.py              # 요청/응답 스키마 (초안)
+└── tests/
+    ├── harness/                    # 테스트 전용 DB 입출력 (운영 미사용, 연동 후 삭제)
+    │   ├── config.py               # DB/API 라우팅 설정
+    │   ├── data_loader.py          # raw 데이터 로딩
+    │   ├── data_writer.py          # 결과 저장
+    │   └── db_test/                # PostgreSQL 직접 접근
+    ├── cli/                        # 로컬 실행 스크립트
+    │   ├── main_pipeline.py        # DB→DB 배치 파이프라인
+    │   ├── calculate_baseline_db.py
+    │   └── calculate_full_mmr_with_db_baseline.py
+    └── test_*.py                   # 단위 테스트
 ```
+
+> **운영 원칙**: 운영에서는 백엔드 API가 HTTP로 raw 데이터를 전달하고 결과도 HTTP 응답으로 돌려받는다. DB 직접 접근과 로컬 배치는 `tests/`(harness·cli)에만 둔다.
 
 ## 개발 환경 설정
 
@@ -103,7 +118,7 @@ psql -d <DB_NAME> -f migrations/002_drop_player_game_id_from_mmr_match_results.s
 DB에서 raw 데이터를 읽고 계산 결과를 DB에 저장합니다.
 
 ```bash
-python scripts/main_pipeline.py --source db --sink db
+python tests/cli/main_pipeline.py --source db --sink db
 ```
 
 백엔드 baseline 저장 API가 준비되기 전에는 DB 테스트 전용 경로를 사용합니다.
@@ -111,8 +126,8 @@ python scripts/main_pipeline.py --source db --sink db
 
 ```bash
 psql -d <DB_NAME> -f migrations/db_test/001_create_mmr_baselines.sql
-python scripts/db_test/calculate_baseline_db.py --season 2026-S1 --baseline-version 2026-06
-python scripts/db_test/calculate_full_mmr_with_db_baseline.py --season 2026-S1 --baseline-version 2026-06
+python tests/cli/calculate_baseline_db.py --season 2026-S1 --baseline-version 2026-06
+python tests/cli/calculate_full_mmr_with_db_baseline.py --season 2026-S1 --baseline-version 2026-06
 ```
 
 결과 테이블까지 저장하려면 전체 MMR 계산 명령에 `--save-results`를 추가합니다.

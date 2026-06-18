@@ -35,11 +35,12 @@ MMR 서비스는 다음을 책임진다.
 
 | 파일 | 설명 |
 | --- | --- |
-| `src/mmr_refactor/mmr.py` | MMR 상태/공통 계산 코어 |
-| `src/mmr_refactor/game_impact.py` | Game Impact 계산과 baseline 적용 함수 |
-| `src/mmr_refactor/baseline.py` | baseline 계산 orchestration |
-| `src/mmr_refactor/service.py` | API service layer |
-| `src/mmr_refactor/api_server.py` | FastAPI endpoint |
+| `src/mmr/gold/mmr.py` | MMR 상태/공통 계산 코어 |
+| `src/mmr/silver/game_impact.py` | Game Impact 계산과 baseline 적용 함수 |
+| `src/mmr/gold/baseline.py` | baseline 계산 orchestration |
+| `src/mmr/serving/service.py` | API service layer |
+| `src/mmr/serving/api_server.py` | FastAPI endpoint |
+| `src/mmr/serving/schemas.py` | 요청/응답 스키마 초안 |
 | `scripts/run_api_server.py` | 로컬 서버 실행 |
 
 ## 계산 흐름

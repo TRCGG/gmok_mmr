@@ -3,14 +3,14 @@
 > **목적**: MMR 계산 입력이 되는 경기 참가자별 스탯 테이블 정의. 현재는 MMR 레포의 SQL 마이그레이션(`migrations/004`, `006`)으로 생성하지만, **운영에서는 백엔드가 리플레이 적재 시 이 구조로 저장**한다.
 > **단위**: 한 row = 한 경기의 한 참가자(player-game). 한 경기 = 정확히 10 row.
 > **출처**: raw 지표는 `replay.raw_data`(JSONB 배열) 파싱, 파생지표는 raw에서 계산.
-> **검증 기준**: 2026-06-18 현재 `src/mmr_refactor` 소스 기준.
+> **검증 기준**: 2026-06-18 현재 `src/mmr` 소스 기준.
 
 > **테이블명 매핑(현재 상태)**: `match_participant_metric`은 **운영 목표 테이블명**이다. 현재 DB 테스트 단계의 실제 테이블은 다음과 같다.
 > | 역할 | 실제 테이블 | 비고 |
 > |---|---|---|
 > | 신포맷 적재 | `player_game_stats` | `migrations/003`/`004`/`006` |
 > | 구포맷 적재 | `player_game_stats_old` | 동일 |
-> | MMR 로더가 읽는 테이블 | env `MMR_PLAYER_GAME_TABLE` (기본 `player_game`) | `db_test/repository.py`가 SELECT |
+> | MMR 로더가 읽는 테이블 | env `MMR_PLAYER_GAME_TABLE` (기본 `player_game`) | `tests/harness/db_test/repository.py`가 SELECT |
 >
 > 백엔드 연동이 끝나면 이 정의서의 `match_participant_metric` 구조로 통일한다.
 
@@ -130,7 +130,7 @@
 
 ## 3. 파생지표 산식 (정확 재현 필수)
 
-MMR 파이프라인(`features.py add_basic_features`, `silver.py clean_match_data`)과 **수치가 정확히 일치해야 한다.** 단위 변환을 틀리면 per-min 값이 60배 어긋난다.
+MMR 파이프라인(`mmr/silver/features.py add_basic_features`, `mmr/silver/cleaning.py clean_match_data`)과 **수치가 정확히 일치해야 한다.** 단위 변환을 틀리면 per-min 값이 60배 어긋난다.
 
 ### 3.1 공통 전처리
 
@@ -139,8 +139,8 @@ MMR 파이프라인(`features.py add_basic_features`, `silver.py clean_match_dat
 deaths_safe = (deaths = 0) ? 1 : deaths          # 0데스 방지
 ```
 
-- **`game_duration`(분 환산)만 소수점 둘째 자리 반올림**한다. 이는 `silver.py clean_match_data`가 계산 전에 초→분으로 변환할 때 적용된다.
-- **개별 파생지표(per-min, kda 등)는 반올림하지 않는다 — full precision으로 계산한다.** `features.py add_basic_features`도, 현재 적재 SQL(`migrations/006`)도 파생지표에 `ROUND`를 적용하지 않는다. 재현성을 위해 백엔드 적재 시에도 반올림하지 말 것.
+- **`game_duration`(분 환산)만 소수점 둘째 자리 반올림**한다. 이는 `mmr/silver/cleaning.py clean_match_data`가 계산 전에 초→분으로 변환할 때 적용된다.
+- **개별 파생지표(per-min, kda 등)는 반올림하지 않는다 — full precision으로 계산한다.** `mmr/silver/features.py add_basic_features`도, 현재 적재 SQL(`migrations/006`)도 파생지표에 `ROUND`를 적용하지 않는다. 재현성을 위해 백엔드 적재 시에도 반올림하지 말 것.
 - 분모가 0/NULL 이거나 결과가 inf/NaN 이면 **0으로 채운다** (`features.py`의 `inf→NaN→fillna(0)`, SQL의 `COALESCE(..., 0)`).
 - 정수/정수 나눗셈 truncation 방지를 위해 분자를 실수(numeric)로 캐스팅.
 

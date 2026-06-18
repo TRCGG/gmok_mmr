@@ -1,10 +1,10 @@
 # player_game 컬럼 사용 현황
 
-`db_test/repository.py`의 `load_match_dataframe_from_db`가 원천 테이블 전체를 SELECT 한다.
+`tests/harness/db_test/repository.py`의 `load_match_dataframe_from_db`가 원천 테이블 전체를 SELECT 한다.
 이 문서는 각 컬럼이 MMR 계산 파이프라인에서 실제로 사용되는지 여부를 정리한다.
 
 > **원천 테이블명**: env `MMR_PLAYER_GAME_TABLE`로 지정하며 기본값은 `player_game`. 현재 마이그레이션이 실제로 만드는 테이블은 `player_game_stats`(신포맷)/`player_game_stats_old`(구포맷)이다. 컬럼 구조는 `docs/match_participant_metric_table_spec.md` 참조.
-> **검증 기준**: 2026-06-18 현재 `db_test/repository.py` SELECT + `features.py` 사용 기준.
+> **검증 기준**: 2026-06-18 현재 `tests/harness/db_test/repository.py` SELECT + `mmr/silver/features.py` 사용 기준.
 
 ---
 
