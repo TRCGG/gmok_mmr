@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from mmr_refactor.game_impact import (
+from mmr.silver.game_impact import (
     GameImpactBaseline,
     OutcomeNormalizationStats,
     apply_game_impact_baseline,

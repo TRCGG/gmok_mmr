@@ -15,7 +15,7 @@ import uvicorn
 
 def main() -> None:
     uvicorn.run(
-        "mmr_refactor.api_server:app",
+        "mmr.serving.api_server:app",
         host="0.0.0.0",
         port=8000,
         reload=False,

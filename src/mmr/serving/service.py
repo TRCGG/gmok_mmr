@@ -7,13 +7,13 @@ from typing import Any
 
 import pandas as pd
 
-from .baseline import (
+from ..gold.baseline import (
     calculate_service_baseline,
     game_impact_baseline_from_payload,
     service_baseline_to_payload,
 )
-from .features import BASE_METRICS, add_basic_features, select_available_metrics
-from .game_impact import (
+from ..silver.features import BASE_METRICS, add_basic_features, select_available_metrics
+from ..silver.game_impact import (
     apply_game_impact_baseline,
     compute_n_person_contribution,
     compute_raw_game_impact,
@@ -22,7 +22,7 @@ from .game_impact import (
     normalize_minmax_0_100,
     resolve_position_weights,
 )
-from .mmr import (
+from ..gold.mmr import (
     DEFAULT_MMR_SETTINGS,
     MMRBaselineStats,
     MMRRuntimeState,
@@ -30,7 +30,7 @@ from .mmr import (
     update_mmr_matches,
     update_single_match_mmr,
 )
-from .silver import clean_match_data, drop_invalid_matches
+from ..silver.cleaning import clean_match_data, drop_invalid_matches
 
 
 def calculate_baseline_payload(payload: dict[str, Any]) -> dict[str, Any]:

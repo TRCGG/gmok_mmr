@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from mmr_refactor.mmr import (
+from mmr.gold.mmr import (
     DEFAULT_MMR_SETTINGS,
     MMRBaselineStats,
     MMRRuntimeState,

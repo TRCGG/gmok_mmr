@@ -13,26 +13,26 @@ import argparse
 from pathlib import Path
 import sys
 
-ROOT = Path(__file__).resolve().parents[1]
-SRC = ROOT / "src"
-if str(SRC) not in sys.path:
-    sys.path.insert(0, str(SRC))
+ROOT = Path(__file__).resolve().parents[2]
+for _path in (ROOT / "src", ROOT / "tests"):
+    if str(_path) not in sys.path:
+        sys.path.insert(0, str(_path))
 
-from mmr_refactor import (
+from mmr import (
     add_basic_features,
     BASE_METRICS,
     clean_match_data,
     compute_n_person_contribution,
     compute_raw_game_impact,
     compute_vs_opponent,
-    load_match_dataframe,
     normalize_by_position_outcome,
     normalize_minmax_0_100,
     resolve_position_weights,
-    save_mmr_results,
     select_available_metrics,
     update_mmr_elo,
 )
+from harness.data_loader import load_match_dataframe
+from harness.data_writer import save_mmr_results
 
 
 def run_pipeline(

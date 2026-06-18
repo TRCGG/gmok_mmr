@@ -8,8 +8,8 @@ from typing import Any
 
 import pandas as pd
 
-from .features import BASE_METRICS, select_available_metrics
-from .game_impact import (
+from ..silver.features import BASE_METRICS, select_available_metrics
+from ..silver.game_impact import (
     GameImpactBaseline,
     OutcomeNormalizationStats,
     apply_game_impact_baseline,

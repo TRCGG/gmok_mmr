@@ -14,15 +14,15 @@ from pathlib import Path
 import sys
 
 ROOT = Path(__file__).resolve().parents[2]
-SRC = ROOT / "src"
-if str(SRC) not in sys.path:
-    sys.path.insert(0, str(SRC))
+for _path in (ROOT / "src", ROOT / "tests"):
+    if str(_path) not in sys.path:
+        sys.path.insert(0, str(_path))
 
-from mmr_refactor.baseline import calculate_service_baseline, service_baseline_to_payload
-from mmr_refactor.db_test.baseline_repository import save_mmr_baseline_to_db_test
-from mmr_refactor.db_test.repository import load_match_dataframe_from_db
-from mmr_refactor.db_test.run_logger import MMRTestRunLogger
-from mmr_refactor.service import build_base_feature_dataframe
+from mmr.gold.baseline import calculate_service_baseline, service_baseline_to_payload
+from mmr.serving.service import build_base_feature_dataframe
+from harness.db_test.baseline_repository import save_mmr_baseline_to_db_test
+from harness.db_test.repository import load_match_dataframe_from_db
+from harness.db_test.run_logger import MMRTestRunLogger
 
 
 def main() -> None:

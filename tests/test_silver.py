@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from mmr_refactor.silver import clean_match_data, find_rows_with_na
+from mmr.silver import clean_match_data, find_rows_with_na
 
 
 def test_clean_match_data_removes_duplicates_and_converts_basic_fields():

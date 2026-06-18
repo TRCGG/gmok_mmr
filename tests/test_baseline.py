@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from mmr_refactor.baseline import (
+from mmr.gold.baseline import (
     calculate_service_baseline,
     service_baseline_to_payload,
 )

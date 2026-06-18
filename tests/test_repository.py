@@ -3,9 +3,9 @@ from __future__ import annotations
 import inspect
 from pathlib import Path
 
-from mmr_refactor import data_loader
-from mmr_refactor.db_test import baseline_repository
-from mmr_refactor.db_test import repository
+from harness import data_loader
+from harness.db_test import baseline_repository
+from harness.db_test import repository
 
 
 def test_sql_is_owned_by_repository_module():
@@ -49,9 +49,8 @@ def test_db_test_module_owns_temporary_baseline_storage_sql():
 
 def test_full_mmr_db_test_script_loads_baseline_before_calculation():
     script_path = (
-        Path(__file__).resolve().parents[1]
-        / "scripts"
-        / "db_test"
+        Path(__file__).resolve().parent
+        / "cli"
         / "calculate_full_mmr_with_db_baseline.py"
     )
     script_source = script_path.read_text(encoding="utf-8")

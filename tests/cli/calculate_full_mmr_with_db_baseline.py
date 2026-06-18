@@ -22,15 +22,15 @@ import sys
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[2]
-SRC = ROOT / "src"
-if str(SRC) not in sys.path:
-    sys.path.insert(0, str(SRC))
+for _path in (ROOT / "src", ROOT / "tests"):
+    if str(_path) not in sys.path:
+        sys.path.insert(0, str(_path))
 
-from mmr_refactor.data_writer import save_mmr_results
-from mmr_refactor.db_test.baseline_repository import load_mmr_baseline_from_db_test
-from mmr_refactor.db_test.repository import load_match_dataframe_from_db
-from mmr_refactor.db_test.run_logger import MMRTestRunLogger
-from mmr_refactor.service import calculate_full_mmr
+from mmr.serving.service import calculate_full_mmr
+from harness.data_writer import save_mmr_results
+from harness.db_test.baseline_repository import load_mmr_baseline_from_db_test
+from harness.db_test.repository import load_match_dataframe_from_db
+from harness.db_test.run_logger import MMRTestRunLogger
 
 
 def main() -> None:
