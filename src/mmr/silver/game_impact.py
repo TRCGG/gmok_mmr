@@ -299,23 +299,19 @@ def apply_game_impact_baseline(
 ) -> pd.DataFrame:
     out = df.copy()
 
-    # 1. Raw Impact
+    # 저장된 position_weights로 raw_game_impact 재계산
     out["raw_game_impact"] = compute_raw_game_impact(
         out,
         baseline.position_weights,
     )
 
-    # 2. game_impact 추가
-    # 기존 노트북:
-    # MinMaxScaler(feature_range=(0,100))
+    # raw_game_impact를 0~100 범위로 정규화
     out["game_impact"] = normalize_minmax_0_100(
         out["raw_game_impact"]
     )
 
-    # 3. 승패 + 포지션별 정규화
-    # 미리 계산한 baseline의 outcome_stats(저장된 lower/upper)를 그대로 적용한다.
-    # 계산 중에 분위수를 다시 구하는 옛날 방식 대신, 사전 baseline 기준을 사용해야
-    # 전체(RECALC)와 단일 경기 증분 결과가 동일하게 유지된다.
+    # 현재 데이터로 재정규화하지 않고
+    # baseline에 저장된 outcome_stats를 사용해 원본 결과 재현
     out["game_impact_winloss_norm"] = apply_outcome_normalization_stats(
         out,
         baseline.outcome_stats,
@@ -324,15 +320,11 @@ def apply_game_impact_baseline(
         result_col="game_result",
     )
 
-    # 4. 인분
-    out["game_n_person_contribution"] = (
-        compute_n_person_contribution(out)
-    )
+    # 팀 내 기여도 계산
+    out["game_n_person_contribution"] = compute_n_person_contribution(out)
 
-    # 5. 상대 비교
-    out["game_impact_vs_opponent"] = (
-        compute_vs_opponent(out)
-    )
+    # 같은 포지션 상대와 비교한 영향력 계산
+    out["game_impact_vs_opponent"] = compute_vs_opponent(out)
 
     return out
 
