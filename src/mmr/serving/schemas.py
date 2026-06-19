@@ -4,15 +4,15 @@
 위한 **초안**이다. 와이어 계약의 기준 문서는 `docs/interface_spec.md`이며, 본 모델은
 그 계약을 대략적으로 옮긴 스케치 수준이다.
 
+산식 v2 기준 초안이다. 와이어↔내부 변환은 `service._normalize_source_columns`가 담당한다.
+
 TODO(스키마 확정 전 미해결):
-  - [ ] 아직 계약이 확정되지 않았다. 필드/타입은 interface_spec.md 기준으로 대략만 적음.
-  - [ ] 식별자/필드명 갭: 계약은 `custom_match_id`/`kill`/`death`/`assist`를 쓰지만
-        현재 계산 코어(`mmr.silver`, `mmr.gold`)는 `replay_code`/`kills`/`deaths`/`assists`를
-        사용한다. 확정 시 service 레이어에 adapter(필드 매핑)를 둔다.
-  - [ ] position enum 갭: 계약은 `TOP/JUG/MID/ADC/SUP`, 코어는 `TOP/JUNGLE/MIDDLE/BOTTOM/UTILITY`.
-  - [ ] `mmr_history` 응답은 계약에만 있고 코어 미구현. 확정 후 추가.
+  - [ ] v2 baseline 구조(performance/blowout) 백엔드 합의 필요(interface_spec §6 갱신).
+  - [ ] match_results 응답 필드가 v1 factor → v2 perf_z/blow/expected_score로 바뀜(합의 필요).
+  - [ ] pre_match_user_summary가 v2에서 total_mmr/total_games/total_wins를 함께 요구함.
+  - [ ] position enum 갭: 계약은 `TOP/JUG/MID/ADC/SUP`, 내부는 `TOP/JUNGLE/MIDDLE/BOTTOM/UTILITY`.
+  - [ ] `mmr_history` 응답 모델화.
   - [ ] 이 모델들을 `api_server.py` 엔드포인트 시그니처에 실제로 연결할지 결정.
-        (현재 엔드포인트는 raw `dict` payload를 그대로 받는다.)
   - [ ] 에러 응답 포맷(`error_code`/`message`/`details`)과 검증 규칙 반영.
 """
 
@@ -68,19 +68,19 @@ class PlayerGameRow(BaseModel):
     shield_on_teammates: int | None = None
 
 
-class MMRBaselinePayload(BaseModel):
-    """MMR 변동 factor 기준 통계. interface_spec.md §6."""
+class PerformanceBaselinePayload(BaseModel):
+    """perf_z 산정 기준값(v2). robust 기준 + 전역 재표준화 통계."""
 
-    f1_mean: float
-    f2_mean: float
-    # TODO: 키 추가만 허용, 제거/이름변경 금지 (안정성 정책)
+    robust_params: list[dict[str, Any]]  # [{position, metric, center, scale}]
+    raw_perf_stats: dict[str, float]      # {mean, std}
 
 
-class GameImpactBaselinePayload(BaseModel):
-    """Game Impact 고정 baseline. interface_spec.md §6."""
+class BlowoutBaselinePayload(BaseModel):
+    """blow 산정 기준값(v2)."""
 
-    position_weights: dict[str, dict[str, float]]
-    outcome_stats: list[dict[str, Any]]  # [{position, game_result, lower, upper}]
+    gold_diff: dict[str, float]      # {center, scale}
+    duration: dict[str, float]       # {center, scale}
+    blow_raw_stats: dict[str, float] # {mean, std}
 
 
 # ---------------------------------------------------------------------------
@@ -96,8 +96,8 @@ class BaselineCalculateRequest(BaseModel):
 class BaselineCalculateResponse(BaseModel):
     season: str
     baseline_version: str
-    mmr_baseline: MMRBaselinePayload
-    game_impact_baseline: GameImpactBaselinePayload
+    performance_baseline: PerformanceBaselinePayload
+    blowout_baseline: BlowoutBaselinePayload
     metadata: dict[str, Any]  # {match_count, player_game_row_count, calculated_at}
 
 
@@ -106,13 +106,18 @@ class BaselineCalculateResponse(BaseModel):
 # ---------------------------------------------------------------------------
 class UserPositionState(BaseModel):
     position: Position
-    pos_mmr: int = 1300
+    pos_mmr: int = 1500
     pos_games: int = 0
     pos_wins: int = 0
 
 
 class PreMatchUserSummary(BaseModel):
+    """v2 종합 MMR은 독립 누적기라 total_* 를 함께 전달해야 한다."""
+
     puuid: str
+    total_mmr: int = 1500
+    total_games: int = 0
+    total_wins: int = 0
     positions: list[UserPositionState]
 
 
@@ -122,8 +127,8 @@ class MatchCalculateRequest(BaseModel):
     calculation_id: str
     custom_match_id: str
     baseline_version: str
-    mmr_baseline: MMRBaselinePayload
-    game_impact_baseline: GameImpactBaselinePayload
+    performance_baseline: PerformanceBaselinePayload
+    blowout_baseline: BlowoutBaselinePayload
     match_rows: list[PlayerGameRow] = Field(..., min_length=10, max_length=10)
     pre_match_user_summary: list[PreMatchUserSummary]
 
@@ -134,14 +139,16 @@ class MatchResultRow(BaseModel):
     puuid: str
     position: Position
     game_result: GameResult
+    perf_z: float
+    blow: float
     pre_game_mmr: int
+    pre_game_pos_mmr: int
     expected_score: float
     actual_score: float
-    relative_factor: float
-    personal_factor: float
-    final_factor: float
+    k_factor: float
     mmr_change: int
-    post_game_mmr: int
+    total_mmr: int
+    pos_cumulative_mmr: int
 
 
 class MatchCalculateResponse(BaseModel):

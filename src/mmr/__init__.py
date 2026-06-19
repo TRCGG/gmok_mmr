@@ -1,9 +1,9 @@
-"""MMR 계산 파이프라인 패키지 (운영용, API 전용).
+"""MMR 계산 파이프라인 패키지 (운영용, API 전용) — 산식 v2.
 
 데이터 엔지니어링 메달리온 아키텍처의 계산 계층만 포함한다.
 
-- ``silver``  : 정합성 클렌징, 파생 feature, Game Impact 산정
-- ``gold``    : baseline 통계, ELO 기반 MMR 갱신/요약
+- ``silver``  : 적격 필터·클렌징, 파생 feature, 퍼포먼스(perf_z)·승부격차(blow) 산정
+- ``gold``    : baseline 통계, 팀 평균 Elo 기반 MMR 갱신/요약
 - ``serving`` : API service 함수, FastAPI 진입점, 요청/응답 스키마
 
 운영에서는 백엔드 API가 HTTP로 raw 데이터를 전달하고, 계산 결과도 HTTP 응답으로
@@ -14,32 +14,37 @@
 """
 
 from .silver import (
-    BASE_METRICS,
-    GameImpactBaseline,
-    OutcomeNormalizationStats,
+    BlowoutBaseline,
+    DERIVED_METRICS,
+    PerformanceBaseline,
+    RobustParam,
+    StandardizeParam,
     add_basic_features,
-    apply_game_impact_baseline,
-    apply_outcome_normalization_stats,
+    all_perf_metrics,
+    apply_performance_features,
     clean_match_data,
-    compute_n_person_contribution,
-    compute_raw_game_impact,
-    compute_vs_opponent,
-    derive_outcome_normalization_stats,
-    derive_position_weights,
+    compute_blowout,
+    compute_perf_z,
+    derive_blowout_baseline,
+    derive_performance_baseline,
+    drop_invalid_matches,
+    filter_eligible,
     find_rows_with_na,
-    normalize_by_position_outcome,
-    normalize_minmax_0_100,
-    resolve_position_weights,
-    select_available_metrics,
+    position_metric_weights,
 )
 from .gold import (
     DEFAULT_MMR_SETTINGS,
-    MMRBaselineStats,
     MMRRuntimeState,
     MMRSettings,
     ServiceBaseline,
+    blowout_baseline_from_payload,
+    blowout_baseline_to_payload,
+    calculate_k_factor,
     calculate_service_baseline,
+    expected_performance,
     make_summary_df_wide,
+    performance_baseline_from_payload,
+    performance_baseline_to_payload,
     service_baseline_to_payload,
     update_mmr_elo,
     update_mmr_matches,
@@ -54,31 +59,36 @@ from .serving import (
 
 __all__ = [
     # silver
-    "BASE_METRICS",
     "add_basic_features",
-    "select_available_metrics",
+    "DERIVED_METRICS",
     "clean_match_data",
+    "filter_eligible",
+    "drop_invalid_matches",
     "find_rows_with_na",
-    "GameImpactBaseline",
-    "OutcomeNormalizationStats",
-    "apply_game_impact_baseline",
-    "apply_outcome_normalization_stats",
-    "derive_outcome_normalization_stats",
-    "derive_position_weights",
-    "resolve_position_weights",
-    "compute_raw_game_impact",
-    "normalize_minmax_0_100",
-    "normalize_by_position_outcome",
-    "compute_n_person_contribution",
-    "compute_vs_opponent",
+    "PerformanceBaseline",
+    "BlowoutBaseline",
+    "RobustParam",
+    "StandardizeParam",
+    "all_perf_metrics",
+    "position_metric_weights",
+    "apply_performance_features",
+    "compute_perf_z",
+    "compute_blowout",
+    "derive_performance_baseline",
+    "derive_blowout_baseline",
     # gold
     "ServiceBaseline",
     "calculate_service_baseline",
     "service_baseline_to_payload",
+    "performance_baseline_to_payload",
+    "performance_baseline_from_payload",
+    "blowout_baseline_to_payload",
+    "blowout_baseline_from_payload",
     "DEFAULT_MMR_SETTINGS",
-    "MMRBaselineStats",
     "MMRRuntimeState",
     "MMRSettings",
+    "calculate_k_factor",
+    "expected_performance",
     "update_mmr_elo",
     "update_mmr_matches",
     "update_single_match_mmr",

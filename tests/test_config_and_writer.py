@@ -14,13 +14,14 @@ def test_config_defaults(monkeypatch):
     monkeypatch.delenv("MMR_MATCH_RESULT_TABLE", raising=False)
     monkeypatch.delenv("MMR_SUMMARY_TABLE", raising=False)
     monkeypatch.delenv("MMR_PLAYER_GAME_TABLE", raising=False)
+    monkeypatch.delenv("MMR_PARTICIPANT_METRIC_TABLE", raising=False)
     monkeypatch.delenv("MMR_PLAYER_TABLE", raising=False)
 
     assert config.get_data_source() == "db"
     assert config.get_result_sink() == "db"
     assert db_config.get_mmr_match_result_table() == "mmr_match_results"
     assert db_config.get_mmr_summary_table() == "mmr_user_summary"
-    assert db_config.get_player_game_table() == "player_game"
+    assert db_config.get_player_game_table() == "mmr_participant_metric"
     assert db_config.get_player_table() == "player"
 
 

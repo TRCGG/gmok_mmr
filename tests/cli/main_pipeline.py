@@ -20,15 +20,11 @@ for _path in (ROOT / "src", ROOT / "tests"):
 
 from mmr import (
     add_basic_features,
-    BASE_METRICS,
+    apply_performance_features,
     clean_match_data,
-    compute_n_person_contribution,
-    compute_raw_game_impact,
-    compute_vs_opponent,
-    normalize_by_position_outcome,
-    normalize_minmax_0_100,
-    resolve_position_weights,
-    select_available_metrics,
+    derive_blowout_baseline,
+    derive_performance_baseline,
+    drop_invalid_matches,
     update_mmr_elo,
 )
 from harness.data_loader import load_match_dataframe
@@ -38,26 +34,16 @@ from harness.data_writer import save_mmr_results
 def run_pipeline(
     source: str | None = None,
     sink: str | None = None,
-    position_weights=None,
 ):
+    """v2 산식 전체 파이프라인 (clean → feature → perf/blow → 팀평균 Elo)."""
     raw_df = load_match_dataframe(source=source)
     clean_df = clean_match_data(raw_df, convert_duration_to_minutes=True)
+    clean_df = drop_invalid_matches(clean_df)
     feature_df = add_basic_features(clean_df)
 
-    metrics = select_available_metrics(feature_df, BASE_METRICS)
-    if not metrics:
-        raise RuntimeError("No usable metric columns were found for Game Impact calculation.")
-
-    position_weights = resolve_position_weights(
-        feature_df,
-        metrics=metrics,
-        position_weights=position_weights,
-    )
-    feature_df["raw_game_impact"] = compute_raw_game_impact(feature_df, position_weights)
-    feature_df["game_impact"] = normalize_minmax_0_100(feature_df["raw_game_impact"])
-    feature_df["game_impact_winloss_norm"] = normalize_by_position_outcome(feature_df)
-    feature_df["game_n_person_contribution"] = compute_n_person_contribution(feature_df)
-    feature_df["game_impact_vs_opponent"] = compute_vs_opponent(feature_df)
+    perf_baseline = derive_performance_baseline(feature_df)
+    blow_baseline = derive_blowout_baseline(feature_df)
+    feature_df = apply_performance_features(feature_df, perf_baseline, blow_baseline)
 
     mmr_df_updated, summary_df = update_mmr_elo(feature_df)
     save_mmr_results(mmr_df_updated, summary_df, sink=sink)

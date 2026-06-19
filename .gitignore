@@ -19,3 +19,7 @@ output/
 *.xlsx
 *.png
 pytest-cache-files-*/
+
+# Local data exports (DB CSV 덤프 등, 커밋 금지)
+data/
+*.csv

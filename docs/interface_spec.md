@@ -3,6 +3,7 @@
 > **목적**: 백엔드(`loltrix_be`)와 MMR 계산 서비스(`gmok_mmr`) 간 HTTP 인터페이스를 정의한다.
 > **범위**: 와이어 입출력(요청/응답/에러)만. 산식·내부 계산은 gmok_mmr 책임이라 본 문서 밖.
 > **기준 문서**: 본 정의서가 두 레포의 통신 계약(SoT). 코드가 이 문서와 다르면 코드가 잘못된 것이다.
+> **버전**: MMR **산식 v2**(팀 평균 Elo + robust-z 퍼포먼스 + 승부격차) 반영. baseline/응답 필드 변경은 백엔드 합의 완료(2026-06). 와이어 URL prefix는 `/v1/` 유지(필드 단위 합의로 호환 관리).
 
 | 항목 | 값 |
 |---|---|
@@ -84,17 +85,23 @@
 | `total_damage_champions` | integer | ✅ | 챔피언 가한 피해 |
 | `total_damage_taken` | integer | ✅ | 받은 피해 |
 | `vision_score` | integer | ✅ | 시야 점수 |
-| `total_damage_dealt_to_buildings` | integer | ⬜ | 권장(Game Impact 정밀도) |
+| `total_damage_dealt_to_buildings` | integer | ⬜ | 권장(퍼포먼스 정밀도) |
 | `vision_bought` | integer | ⬜ | 권장 |
-| `minions_killed` | integer | ⬜ | 권장 |
-| `neutral_minions_killed` | integer | ⬜ | 권장 |
+| `minions_killed` | integer | ⬜ | 권장(cs_per_min) |
+| `neutral_minions_killed` | integer | ⬜ | 권장(cs_per_min) |
 | `wards_placed` | integer | ⬜ | 권장 |
 | `wards_killed` | integer | ⬜ | 권장 |
 | `time_spent_dead` | integer | ⬜ | 권장 |
-| `heal_on_teammates` | integer | ⬜ | 권장 |
-| `shield_on_teammates` | integer | ⬜ | 권장 |
+| `heal_on_teammates` | integer | ⬜ | 권장(SUP 퍼포먼스) |
+| `shield_on_teammates` | integer | ⬜ | 권장(SUP 퍼포먼스) |
+| `damage_self_mitigated` | integer | ⬜ | 권장(TOP 퍼포먼스) |
+| `damage_to_objectives` | integer | ⬜ | 권장(JUG 퍼포먼스) |
+| `dragon_kills` | integer | ⬜ | 권장(JUG 퍼포먼스) |
+| `takedowns_before_15min` | integer | ⬜ | 권장(라인전 퍼포먼스) |
+| `turret_plates_destroyed` | integer | ⬜ | 권장(라인전 퍼포먼스) |
 
-> ✅ 필수, ⬜ 권장(누락 시 0으로 간주 가능). gmok_mmr은 받은 행이 전부 적격(loltrix가 사전 검증)이라고 가정한다.
+> ✅ 필수, ⬜ 권장(누락 시 0으로 간주 → 해당 지표 robust_z 기여 0). gmok_mmr은 받은 행이 전부 적격(loltrix가 사전 검증)이라고 가정한다.
+> **계정 통합**: 부계정→메인 병합은 백엔드가 저장 시점에 끝내고, gmok_mmr은 받은 `puuid`를 그대로 사용한다.
 
 ---
 
@@ -117,18 +124,22 @@
 |---|---|---|
 | `season` | string | |
 | `baseline_version` | string | |
-| `mmr_baseline` | object | `{ f1_mean: number, f2_mean: number }` |
-| `game_impact_baseline` | object | `{ position_weights, outcome_stats }` (§6 구조) |
+| `performance_baseline` | object | perf_z 표준화 기준 (§6 구조) |
+| `blowout_baseline` | object | blow 표준화 기준 (§6 구조) |
 | `metadata` | object | `{ match_count, player_game_row_count, calculated_at }` |
 
 ```json
 {
   "season": "2026",
   "baseline_version": "2026-06",
-  "mmr_baseline": { "f1_mean": 1.0, "f2_mean": 50.0 },
-  "game_impact_baseline": {
-    "position_weights": { "TOP": { "kill": 0.12, "death": 0.08, "assist": 0.05 } },
-    "outcome_stats": [ { "position": "TOP", "game_result": 1, "lower": 12.3, "upper": 87.5 } ]
+  "performance_baseline": {
+    "robust_params": [ { "position": "TOP", "metric": "kda", "center": 3.1, "scale": 2.4 } ],
+    "raw_perf_stats": { "mean": 0.0, "std": 1.7 }
+  },
+  "blowout_baseline": {
+    "gold_diff": { "center": 8500.0, "scale": 6200.0 },
+    "duration": { "center": 28.5, "scale": 9.0 },
+    "blow_raw_stats": { "mean": 0.0, "std": 1.4 }
   },
   "metadata": { "match_count": 1000, "player_game_row_count": 10000, "calculated_at": "2026-06-01T00:00:00Z" }
 }
@@ -157,19 +168,22 @@
 | `calculation_id` | string | ✅ | loltrix 생성, 응답에 그대로 반환 |
 | `custom_match_id` | string | ✅ | |
 | `baseline_version` | string | ✅ | 사용 baseline 버전 |
-| `mmr_baseline` | object | ✅ | #1 응답의 `mmr_baseline` 그대로 |
-| `game_impact_baseline` | object | ✅ | #1 응답의 `game_impact_baseline` 그대로 |
+| `performance_baseline` | object | ✅ | #1 응답의 `performance_baseline` 그대로 |
+| `blowout_baseline` | object | ✅ | #1 응답의 `blowout_baseline` 그대로 |
 | `match_rows` | Player-Game Row[] | ✅ | **정확히 10개** |
-| `pre_match_user_summary` | object[] | ✅ | 참가자 10명의 계산 직전 포지션별 상태 |
+| `pre_match_user_summary` | object[] | ✅ | 참가자 10명의 계산 직전 상태 |
 
 **`pre_match_user_summary[]` 원소**
 
 | 필드 | 타입 | 설명 |
 |---|---|---|
 | `puuid` | string | |
+| `total_mmr` | integer | 종합 MMR (v2 독립 누적기) |
+| `total_games` | integer | 종합 누적 경기수 (배치 보정 판정에 사용) |
+| `total_wins` | integer | 종합 누적 승수 |
 | `positions` | object[] | `{ position, pos_mmr:int, pos_games:int, pos_wins:int }[]` |
 
-> 누락된 참가자/포지션은 gmok_mmr이 신규(`pos_mmr=1300, pos_games=0, pos_wins=0`)로 간주한다. `match_rows`의 position과 `pre_match_user_summary`의 positions는 일치할 필요 없음(유저가 여러 포지션 이력 보유 가능).
+> v2 종합 MMR은 라인 평균이 아니라 **독립 누적기**이므로 `total_mmr`/`total_games`/`total_wins`를 함께 전달해야 한다. 누락된 참가자/포지션은 gmok_mmr이 신규(`total_mmr=pos_mmr=1500, games=0, wins=0`)로 간주한다.
 
 ### 5.2 Response 200
 
@@ -189,22 +203,28 @@
 | `match_participant_id` | integer | |
 | `puuid` | string | |
 | `position` | enum | |
+| `game_team` | enum | `blue`/`red` |
 | `game_result` | enum(0\|1) | |
-| `pre_game_mmr` | integer | 경기 전 포지션 MMR |
-| `expected_score` | number | ELO 기대 점수 |
-| `actual_score` | number | 실제 기여 점수 |
-| `relative_factor` | number | |
-| `personal_factor` | number | |
-| `final_factor` | number | |
-| `mmr_change` | integer | 변동량(±) |
-| `post_game_mmr` | integer | 경기 후 포지션 MMR |
+| `perf_z` | number | 개인 퍼포먼스 점수([−2.5,2.5]) |
+| `blow` | number | 경기 승부격차 강도([−1,1]) |
+| `pre_game_mmr` | integer | 경기 전 종합 MMR |
+| `pre_game_pos_mmr` | integer | 경기 전 포지션 MMR |
+| `team_mmr` | number | 경기 전 우리 팀 평균 MMR |
+| `expected_score` | number | Elo 팀 기대승률 E |
+| `actual_score` | number | 실제 결과 s (1/0) |
+| `k_factor` | number | 적용된 K |
+| `mmr_change` | integer | 변동량 Δ(±, 종합·포지션 동일) |
+| `total_mmr` | integer | 경기 후 종합 MMR |
+| `pos_cumulative_mmr` | integer | 경기 후 포지션 MMR |
+
+> v2는 Δ=K·(s−E)를 종합 MMR과 해당 포지션 라인 MMR에 **동일하게** 누적한다.
 
 **`updated_user_summary[]` 원소**
 
 | 필드 | 타입 | 설명 |
 |---|---|---|
 | `puuid` | string | |
-| `total_mmr` | integer | 포지션 가중평균 |
+| `total_mmr` | integer | 종합 MMR (독립 누적기) |
 | `total_games` | integer | |
 | `total_wins` | integer | |
 | `positions` | object[] | `{ position, pos_mmr, pos_games, pos_wins }[]` (절대값) |
@@ -239,9 +259,13 @@
 
 | 키 | 구조 | 변경 정책 |
 |---|---|---|
-| `mmr_baseline` | `{ f1_mean, f2_mean }` | 키 추가만 허용, 제거·이름변경 금지 |
-| `game_impact_baseline.position_weights` | `{ position: { metric: weight } }` | 중첩 dict |
-| `game_impact_baseline.outcome_stats` | `[ { position, game_result, lower, upper } ]` | 배열 |
+| `performance_baseline.robust_params` | `[ { position, metric, center, scale } ]` | 포지션·지표별 robust(중앙값/IQR) 기준. 배열 |
+| `performance_baseline.raw_perf_stats` | `{ mean, std }` | 전역 raw_perf 재표준화 기준 |
+| `blowout_baseline.gold_diff` | `{ center, scale }` | 팀 골드차 robust 기준 |
+| `blowout_baseline.duration` | `{ center, scale }` | 게임시간 robust 기준 |
+| `blowout_baseline.blow_raw_stats` | `{ mean, std }` | blow_raw 표준화 기준 |
+
+> 키 추가만 허용, 제거·이름변경은 버전 영향. baseline은 매 #2 호출에 동일하게 전달해 증분 결과가 전체 재계산(RECALC)과 일치하도록 한다(§10).
 
 ---
 
@@ -268,6 +292,7 @@
 - 각 `(position, game_result)`마다 승자 1·패자 1
 - 같은 경기 내 `puuid` 중복 없음
 - `position`/`game_team`/`game_result` 모두 정의된 enum
+- **팀 구조(v2 팀 평균 Elo 전제)**: 정확히 2개 `game_team`, 각 팀 5명, 팀 단위 승패 일치(승팀 전원 `game_result=1`, 패팀 전원 `0`)
 
 위반 시 HTTP 400 + 해당 `error_code`.
 

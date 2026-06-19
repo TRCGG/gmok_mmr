@@ -33,7 +33,10 @@ def main() -> None:
     parser.add_argument("--inactive", action="store_true")
     args = parser.parse_args()
 
-    source_table = os.environ.get("MMR_PLAYER_GAME_TABLE", "player_game")
+    source_table = os.environ.get(
+        "MMR_PARTICIPANT_METRIC_TABLE",
+        os.environ.get("MMR_PLAYER_GAME_TABLE", "mmr_participant_metric"),
+    )
 
     with MMRTestRunLogger(
         script_name="calculate_baseline_db",
@@ -50,7 +53,7 @@ def main() -> None:
         )
         payload = service_baseline_to_payload(
             baseline,
-            match_count=feature_df["replay_code"].nunique(),
+            match_count=feature_df["custom_match_id"].nunique(),
             player_game_row_count=len(feature_df),
         )
         save_mmr_baseline_to_db_test(payload, is_active=not args.inactive)

@@ -12,8 +12,9 @@ CREATE TABLE IF NOT EXISTS mmr_baselines (
     baseline_version VARCHAR(64) NOT NULL,
     is_active BOOLEAN NOT NULL DEFAULT false,
 
-    mmr_baseline JSONB NOT NULL,
-    game_impact_baseline JSONB NOT NULL,
+    -- 산식 v2 baseline: 퍼포먼스(perf_z) · 승부격차(blow) 표준화 기준값
+    performance_baseline JSONB NOT NULL,
+    blowout_baseline JSONB NOT NULL,
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
 
     match_count INTEGER,

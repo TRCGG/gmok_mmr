@@ -19,79 +19,28 @@ from .config import (
 
 
 def load_match_dataframe_from_db(guild_id: str | None = None) -> pd.DataFrame:
-    """PostgreSQL에서 원천 player-game 레코드를 읽는다.
+    """PostgreSQL ``mmr_participant_metric`` 에서 원천 참가자 지표를 읽는다.
+
+    내부 파이프라인은 DDL 컬럼명을 그대로 쓰므로 별도 alias 없이 ``*`` 로 읽고,
+    interface_spec 호환을 위해 PK ``id`` 를 ``match_participant_id`` 로만 추가 노출한다.
+    적격 필터(is_mmr_eligible/is_deleted)는 cleaning에서도 적용되지만 read 단계에서도 건다.
 
     Args:
         guild_id: 지정 시 해당 guild의 경기만 읽는다. None이면 전체.
     """
     engine = create_engine(get_db_url())
-    player_game_table = get_player_game_table()
-    where_clause = "WHERE pg.guild_id = :guild_id" if guild_id is not None else ""
+    table = get_player_game_table()
+    guild_clause = "AND mpm.guild_id = :guild_id" if guild_id is not None else ""
 
     query = text(
         f"""
         SELECT
-            pg.id                                           AS player_game_id,
-            pg.replay_code                                  AS replay_code,
-            pg.puuid                                        AS puuid,
-            pg.guild_id                                     AS guild_id,
-            pg.champion_id                                 AS champion_id,
-            pg.team                                        AS team,
-            pg.position                                    AS position,
-            pg.win                                         AS win,
-            pg.kills                                       AS kills,
-            pg.deaths                                      AS deaths,
-            pg.assists                                     AS assists,
-            pg.double_kills                                 AS double_kills,
-            pg.triple_kills                                 AS triple_kills,
-            pg.quadra_kills                                 AS quadra_kills,
-            pg.penta_kills                                  AS penta_kills,
-            pg.killing_sprees                               AS killing_sprees,
-            pg.largest_killing_spree                        AS largest_killing_spree,
-            pg.gold_earned                                 AS gold,
-            pg.cc_time                                     AS cc_time,
-            pg.game_duration                               AS game_duration,
-            pg.damage_to_champions                         AS damage_to_champions,
-            pg.damage_taken                                AS damage_taken,
-            pg.damage_self_mitigated                        AS damage_self_mitigated,
-            pg.vision_score                                AS vision_score,
-            pg.wards_placed                                AS wards_placed,
-            pg.wards_killed                                AS wards_killed,
-            pg.detector_wards_placed                        AS detector_wards_placed,
-            pg.control_wards_bought                        AS vision_bought,
-            pg.minions_killed                              AS minions_killed,
-            pg.neutral_minions_killed                       AS neutral_minions_killed,
-            pg.time_spent_dead                              AS time_spent_dead,
-            pg.longest_time_living                          AS longest_time_living,
-            pg.damage_to_turrets                            AS damage_to_turrets,
-            pg.damage_to_objectives                         AS damage_to_objectives,
-            pg.dragon_kills                                 AS dragon_kills,
-            pg.baron_kills                                  AS baron_kills,
-            pg.herald_kills                                 AS herald_kills,
-            pg.horde_kills                                  AS horde_kills,
-            pg.last_takedown_time                           AS last_takedown_time,
-            pg.turrets_killed                               AS turrets_killed,
-            pg.turret_takedowns                             AS turret_takedowns,
-            pg.level                                       AS level,
-            pg.exp                                         AS exp,
-            pg.turret_plates_destroyed                      AS turret_plates_destroyed,
-            pg.takedowns_under_turret                       AS takedowns_under_turret,
-            pg.takedowns_before_15min                       AS takedowns_before_15min,
-            pg.jungle_cs_own                                AS jungle_cs_own,
-            pg.jungle_cs_enemy                              AS jungle_cs_enemy,
-            pg.damage_to_epic_monsters                      AS damage_to_epic_monsters,
-            pg.objectives_stolen                            AS objectives_stolen,
-            pg.barracks_killed                              AS barracks_killed,
-            pg.heal_on_teammates                           AS heal_on_teammates,
-            pg.shield_on_teammates                         AS shield_on_teammates,
-            pg.enemy_missing_pings                          AS enemy_missing_pings,
-            pg.retreat_pings                                AS retreat_pings,
-            pg.on_my_way_pings                              AS on_my_way_pings,
-            pg.command_pings                                AS command_pings,
-            pg.created_at                                   AS created_at,
-            pg.played_at                                   AS played_at
-        FROM {player_game_table} pg
-        {where_clause}
+            mpm.*,
+            mpm.id AS match_participant_id
+        FROM {table} mpm
+        WHERE COALESCE(mpm.is_deleted, false) = false
+          AND COALESCE(mpm.is_mmr_eligible, true) = true
+          {guild_clause}
         """
     )
 

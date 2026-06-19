@@ -1,88 +1,133 @@
+"""serving 계층 통합 테스트: 와이어(interface_spec) → 내부 → MMR.
+
+증분(단일경기) 반복 호출이 전체 재계산과 동일한 결과를 내는지(interface_spec §10)
+서비스 레벨에서 검증한다.
+"""
+
 from __future__ import annotations
 
-import numpy as np
-import pandas as pd
-
-from mmr.silver.features import add_basic_features
-
-
-def test_add_basic_features_creates_rate_and_efficiency_columns():
-    df = pd.DataFrame(
-        {
-            "game_duration": [2.0],
-            "deaths": [2],
-            "kills": [4],
-            "assists": [6],
-            "gold": [1000],
-            "damage_to_champions": [800],
-            "damage_taken": [600],
-            "cc_time": [20],
-            "exp": [900],
-            "damage_to_turrets": [200],
-            "minions_killed": [10],
-            "neutral_minions_killed": [4],
-            "wards_placed": [6],
-            "wards_killed": [2],
-            "time_spent_dead": [30],
-        }
-    )
-
-    out = add_basic_features(df)
-
-    assert out["gold_per_min"].item() == 500
-    assert out["dpm"].item() == 400
-    assert out["damage_taken_per_min"].item() == 300
-    assert out["cc_time_per_min"].item() == 10
-    assert out["kda"].item() == 5
-    assert out["damage_dealt_per_death"].item() == 400
-    assert out["damage_taken_per_death"].item() == 300
-    assert out["exp_per_min"].item() == 450
-    assert out["damage_to_turrets_per_min"].item() == 100
-    assert out["cs_per_min"].item() == 7
-    assert out["wards_placed_per_min"].item() == 3
-    assert out["wards_killed_per_min"].item() == 1
-    assert out["dead_time_pct"].item() == 25
+from mmr.serving.service import (
+    calculate_baseline_payload,
+    calculate_full_mmr,
+    calculate_single_match_mmr,
+)
 
 
-def test_add_basic_features_creates_lane_gold_diff_against_opponent():
-    df = pd.DataFrame(
-        {
-            "replay_code": ["g1", "g1"],
-            "position": ["TOP", "TOP"],
-            "puuid": ["winner", "loser"],
-            "game_duration": [2.0, 2.0],
-            "deaths": [1, 1],
-            "kills": [1, 1],
-            "assists": [1, 1],
-            "gold": [1200, 900],
-            "damage_to_champions": [100, 100],
-            "damage_taken": [100, 100],
-            "cc_time": [10, 10],
-        }
-    )
-
-    out = add_basic_features(df)
-
-    assert out.loc[out["puuid"] == "winner", "lane_gold_diff"].item() == 300
-    assert out.loc[out["puuid"] == "loser", "lane_gold_diff"].item() == -300
+WIRE_POSITIONS = ("TOP", "JUG", "MID", "ADC", "SUP")
 
 
-def test_add_basic_features_replaces_inf_when_duration_or_deaths_are_zero():
-    df = pd.DataFrame(
-        {
-            "game_duration": [0],
-            "deaths": [0],
-            "kills": [1],
-            "assists": [1],
-            "gold": [1000],
-            "damage_to_champions": [800],
-            "damage_taken": [600],
-            "cc_time": [20],
-        }
-    )
+def _wire_match(match_id: str, date: str, blue_wins: bool, seed: int) -> list[dict]:
+    rows = []
+    pid_counter = seed * 100
+    for i, pos in enumerate(WIRE_POSITIONS):
+        for team, base in (("blue", 1), ("red", 0)):
+            win = (team == "blue") == blue_wins
+            pid_counter += 1
+            rows.append({
+                "custom_match_id": match_id,
+                "match_participant_id": pid_counter,
+                "guild_id": "G1",
+                "season": "2026",
+                "puuid": f"{pos}_{team}",
+                "champion_id": "1",
+                "game_team": team,
+                "position": pos,
+                "game_result": 1 if win else 0,
+                "played_date": date,
+                "time_played": 1800 + i * 60 + base,
+                "kill": 5 + i + base,
+                "death": 3 + base,
+                "assist": 7 + i,
+                "gold": 12000 + i * 500 + (1500 if team == "blue" else 0),
+                "ccing": 20 + i,
+                "exp": 15000 + i * 100,
+                "total_damage_champions": 18000 + i * 1000 + base * 500,
+                "total_damage_taken": 22000 + i * 800,
+                "vision_score": 20 + i * 2,
+                "minions_killed": 150 + i * 5,
+                "neutral_minions_killed": 10 + i,
+                "wards_placed": 12 + i,
+                "wards_killed": 4 + i,
+                "time_spent_dead": 60 + i * 10,
+                "heal_on_teammates": 100 * i,
+                "shield_on_teammates": 50 * i,
+                "damage_self_mitigated": 9000 + i * 300,
+                "damage_to_objectives": 3000 + i * 200,
+                "dragon_kills": i % 3,
+                "takedowns_before_15min": 2 + i,
+                "turret_plates_destroyed": i % 4,
+            })
+    return rows
 
-    out = add_basic_features(df)
-    numeric = out.select_dtypes(include="number")
 
-    assert not np.isinf(numeric.to_numpy()).any()
-    assert not numeric.isna().any().any()
+def _two_matches() -> tuple[list[dict], list[dict]]:
+    m1 = _wire_match("g1", "2026-01-01T10:00:00", blue_wins=True, seed=1)
+    m2 = _wire_match("g2", "2026-01-02T10:00:00", blue_wins=False, seed=2)
+    return m1, m2
+
+
+def test_calculate_baseline_payload_structure():
+    m1, m2 = _two_matches()
+    payload = calculate_baseline_payload({
+        "season": "2026",
+        "baseline_version": "2026-06",
+        "matches": m1 + m2,
+    })
+    assert payload["performance_baseline"]["robust_params"]
+    assert payload["blowout_baseline"]["gold_diff"]
+    assert payload["metadata"]["match_count"] == 2
+
+
+def test_calculate_full_mmr_structure_and_direction():
+    m1, m2 = _two_matches()
+    baseline = calculate_baseline_payload({
+        "season": "2026", "baseline_version": "2026-06", "matches": m1 + m2,
+    })
+    result = calculate_full_mmr({
+        "guild_id": "G1", "season": "2026", "baseline_version": "2026-06",
+        "matches": m1 + m2,
+        "performance_baseline": baseline["performance_baseline"],
+        "blowout_baseline": baseline["blowout_baseline"],
+    })
+
+    assert result["match_results"]
+    assert result["user_summary"]
+    # 응답 포지션은 와이어 enum으로 복원
+    positions = {r["position"] for r in result["match_results"]}
+    assert positions <= set(WIRE_POSITIONS)
+
+
+def test_incremental_matches_full_recompute_at_service_level():
+    m1, m2 = _two_matches()
+    baseline = calculate_baseline_payload({
+        "season": "2026", "baseline_version": "2026-06", "matches": m1 + m2,
+    })
+    perf_bl = baseline["performance_baseline"]
+    blow_bl = baseline["blowout_baseline"]
+
+    full = calculate_full_mmr({
+        "guild_id": "G1", "season": "2026", "baseline_version": "2026-06",
+        "matches": m1 + m2,
+        "performance_baseline": perf_bl, "blowout_baseline": blow_bl,
+    })
+
+    # 증분 1: 빈 상태에서 g1
+    single1 = calculate_single_match_mmr({
+        "guild_id": "G1", "season": "2026", "baseline_version": "2026-06",
+        "custom_match_id": "g1", "match_rows": m1,
+        "performance_baseline": perf_bl, "blowout_baseline": blow_bl,
+        "pre_match_user_summary": [],
+    })
+    # 증분 2: g1 이후 상태를 받아 g2
+    single2 = calculate_single_match_mmr({
+        "guild_id": "G1", "season": "2026", "baseline_version": "2026-06",
+        "custom_match_id": "g2", "match_rows": m2,
+        "performance_baseline": perf_bl, "blowout_baseline": blow_bl,
+        "pre_match_user_summary": single1["updated_user_summary"],
+    })
+
+    inc_rows = single1["match_results"] + single2["match_results"]
+    inc = {(r["custom_match_id"], r["puuid"]): r["total_mmr"] for r in inc_rows}
+    full_map = {(r["custom_match_id"], r["puuid"]): r["total_mmr"] for r in full["match_results"]}
+
+    assert inc == full_map

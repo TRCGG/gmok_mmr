@@ -2,7 +2,6 @@
 
 from .service import (
     build_base_feature_dataframe,
-    build_feature_dataframe,
     calculate_baseline_payload,
     calculate_full_mmr,
     calculate_single_match_mmr,
@@ -10,7 +9,6 @@ from .service import (
 
 __all__ = [
     "build_base_feature_dataframe",
-    "build_feature_dataframe",
     "calculate_baseline_payload",
     "calculate_full_mmr",
     "calculate_single_match_mmr",

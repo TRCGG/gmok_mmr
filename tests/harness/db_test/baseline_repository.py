@@ -52,8 +52,8 @@ def save_mmr_baseline_to_db_test(
                     season,
                     baseline_version,
                     is_active,
-                    mmr_baseline,
-                    game_impact_baseline,
+                    performance_baseline,
+                    blowout_baseline,
                     metadata,
                     match_count,
                     player_game_row_count,
@@ -63,8 +63,8 @@ def save_mmr_baseline_to_db_test(
                     :season,
                     :baseline_version,
                     :is_active,
-                    CAST(:mmr_baseline AS jsonb),
-                    CAST(:game_impact_baseline AS jsonb),
+                    CAST(:performance_baseline AS jsonb),
+                    CAST(:blowout_baseline AS jsonb),
                     CAST(:metadata AS jsonb),
                     :match_count,
                     :player_game_row_count,
@@ -72,8 +72,8 @@ def save_mmr_baseline_to_db_test(
                 )
                 ON CONFLICT (season, baseline_version) DO UPDATE SET
                     is_active = EXCLUDED.is_active,
-                    mmr_baseline = EXCLUDED.mmr_baseline,
-                    game_impact_baseline = EXCLUDED.game_impact_baseline,
+                    performance_baseline = EXCLUDED.performance_baseline,
+                    blowout_baseline = EXCLUDED.blowout_baseline,
                     metadata = EXCLUDED.metadata,
                     match_count = EXCLUDED.match_count,
                     player_game_row_count = EXCLUDED.player_game_row_count,
@@ -85,10 +85,8 @@ def save_mmr_baseline_to_db_test(
                 "season": season,
                 "baseline_version": baseline_version,
                 "is_active": is_active,
-                "mmr_baseline": json.dumps(baseline_payload["mmr_baseline"]),
-                "game_impact_baseline": json.dumps(
-                    baseline_payload["game_impact_baseline"]
-                ),
+                "performance_baseline": json.dumps(baseline_payload["performance_baseline"]),
+                "blowout_baseline": json.dumps(baseline_payload["blowout_baseline"]),
                 "metadata": json.dumps(metadata),
                 "match_count": metadata.get("match_count"),
                 "player_game_row_count": metadata.get("player_game_row_count"),
@@ -120,8 +118,8 @@ def load_mmr_baseline_from_db_test(
         SELECT
             season,
             baseline_version,
-            mmr_baseline,
-            game_impact_baseline,
+            performance_baseline,
+            blowout_baseline,
             metadata
         FROM {table_name}
         WHERE {" AND ".join(where)}
@@ -140,8 +138,8 @@ def load_mmr_baseline_from_db_test(
     return {
         "season": row["season"],
         "baseline_version": row["baseline_version"],
-        "mmr_baseline": _coerce_json(row["mmr_baseline"]),
-        "game_impact_baseline": _coerce_json(row["game_impact_baseline"]),
+        "performance_baseline": _coerce_json(row["performance_baseline"]),
+        "blowout_baseline": _coerce_json(row["blowout_baseline"]),
         "metadata": metadata,
     }
 

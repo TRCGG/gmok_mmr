@@ -29,8 +29,11 @@ def get_db_url() -> str:
 
 
 def get_player_game_table() -> str:
-    """DB loader가 조회할 원천 player-game 테이블명을 반환한다."""
-    return _safe_sql_identifier(os.environ.get("MMR_PLAYER_GAME_TABLE", "player_game"))
+    """DB loader가 조회할 원천 참가자 지표 테이블명을 반환한다 (DDL: mmr_participant_metric)."""
+    return _safe_sql_identifier(
+        os.environ.get("MMR_PARTICIPANT_METRIC_TABLE")
+        or os.environ.get("MMR_PLAYER_GAME_TABLE", "mmr_participant_metric")
+    )
 
 
 def get_player_table() -> str:

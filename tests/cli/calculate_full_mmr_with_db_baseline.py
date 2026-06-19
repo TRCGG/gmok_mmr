@@ -42,7 +42,10 @@ def main() -> None:
     parser.add_argument("--save-results", action="store_true")
     args = parser.parse_args()
 
-    source_table = os.environ.get("MMR_PLAYER_GAME_TABLE", "player_game")
+    source_table = os.environ.get(
+        "MMR_PARTICIPANT_METRIC_TABLE",
+        os.environ.get("MMR_PLAYER_GAME_TABLE", "mmr_participant_metric"),
+    )
 
     baseline_payload = load_mmr_baseline_from_db_test(
         season=args.season,
@@ -66,8 +69,8 @@ def main() -> None:
                 "guild_id": args.guild_id,
                 "season": args.season,
                 "baseline_version": baseline_payload["baseline_version"],
-                "mmr_baseline": baseline_payload["mmr_baseline"],
-                "game_impact_baseline": baseline_payload["game_impact_baseline"],
+                "performance_baseline": baseline_payload["performance_baseline"],
+                "blowout_baseline": baseline_payload["blowout_baseline"],
                 "matches": raw_df.to_dict(orient="records"),
             }
         )

@@ -12,27 +12,21 @@ def test_sql_is_owned_by_repository_module():
     repository_source = inspect.getsource(repository)
     loader_source = inspect.getsource(data_loader)
 
-    assert "FROM {player_game_table} pg" in repository_source
+    assert "FROM {table} mpm" in repository_source
     assert "FROM {player_table}" in repository_source
-    assert "FROM {player_game_table} pg" not in loader_source
+    assert "FROM {table} mpm" not in loader_source
 
 
-def test_raw_match_sql_selects_original_mmr_metric_source_columns():
+def test_raw_match_sql_reads_from_participant_metric_table():
     repository_source = inspect.getsource(repository)
 
-    expected_columns = [
-        "pg.exp",
-        "pg.damage_to_turrets",
-        "pg.minions_killed",
-        "pg.neutral_minions_killed",
-        "pg.wards_placed",
-        "pg.wards_killed",
-        "pg.heal_on_teammates",
-        "pg.shield_on_teammates",
-    ]
-
-    for column in expected_columns:
-        assert column in repository_source
+    # v2: 내부 파이프라인이 DDL 컬럼명을 그대로 쓰므로 alias 없이 mmr_participant_metric을 읽는다.
+    assert "mmr_participant_metric" in repository_source
+    assert "mpm.*" in repository_source
+    assert "mpm.id AS match_participant_id" in repository_source
+    # 적격 필터를 read 단계에서도 적용
+    assert "is_deleted" in repository_source
+    assert "is_mmr_eligible" in repository_source
 
 
 def test_db_test_module_owns_temporary_baseline_storage_sql():
@@ -44,7 +38,8 @@ def test_db_test_module_owns_temporary_baseline_storage_sql():
     assert "INSERT INTO {table_name}" in baseline_repository_source
     assert "ON CONFLICT (season, baseline_version) DO UPDATE" in baseline_repository_source
     assert "is_active = true" in baseline_repository_source
-    assert "CAST(:mmr_baseline AS jsonb)" in baseline_repository_source
+    assert "CAST(:performance_baseline AS jsonb)" in baseline_repository_source
+    assert "CAST(:blowout_baseline AS jsonb)" in baseline_repository_source
 
 
 def test_full_mmr_db_test_script_loads_baseline_before_calculation():
