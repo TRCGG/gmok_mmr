@@ -38,7 +38,8 @@ def save_mmr_results(
 def _stamp(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
     out.columns = [str(c).lower() for c in out.columns]
-    out = out.drop(columns=["player_game_id"], errors="ignore")
+    # 원천 PK(id)·v1 잔재(player_game_id)는 결과 테이블 PK와 충돌하므로 제거
+    out = out.drop(columns=["id", "player_game_id"], errors="ignore")
     float_cols = out.select_dtypes(include="floating").columns
     out[float_cols] = out[float_cols].round(2)
     out["calculated_at"] = datetime.now(UTC)
