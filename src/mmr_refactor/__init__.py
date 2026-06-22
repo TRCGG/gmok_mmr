@@ -1,46 +1,17 @@
-from .splitter import split_notebook_by_markdown_headers, write_sections
-from .data_loader import load_match_dataframe, load_user_name_dataframe
-from .data_writer import save_mmr_results
-from .features import BASE_METRICS, add_basic_features, select_available_metrics
-from .silver import clean_match_data, find_rows_with_na
-from .game_impact import (
-    derive_position_weights,
-    resolve_position_weights,
-    compute_raw_game_impact,
-    normalize_minmax_0_100,
-    normalize_by_position_outcome,
-    compute_n_person_contribution,
-    compute_vs_opponent,
-)
-from .mmr import (
-    DEFAULT_MMR_SETTINGS,
-    MMRSettings,
-    update_mmr_elo,
-    make_summary_df_wide,
-    validate_mmr_input_matches,
+"""Serving 계층: API service 함수, FastAPI 진입점, 요청/응답 스키마."""
+
+from .service import (
+    build_base_feature_dataframe,
+    build_feature_dataframe,
+    calculate_baseline_payload,
+    calculate_full_mmr,
+    calculate_single_match_mmr,
 )
 
 __all__ = [
-    "split_notebook_by_markdown_headers",
-    "write_sections",
-    "load_match_dataframe",
-    "load_user_name_dataframe",
-    "save_mmr_results",
-    "BASE_METRICS",
-    "add_basic_features",
-    "select_available_metrics",
-    "clean_match_data",
-    "find_rows_with_na",
-    "derive_position_weights",
-    "resolve_position_weights",
-    "compute_raw_game_impact",
-    "normalize_minmax_0_100",
-    "normalize_by_position_outcome",
-    "compute_n_person_contribution",
-    "compute_vs_opponent",
-    "DEFAULT_MMR_SETTINGS",
-    "MMRSettings",
-    "update_mmr_elo",
-    "make_summary_df_wide",
-    "validate_mmr_input_matches",
+    "build_base_feature_dataframe",
+    "build_feature_dataframe",
+    "calculate_baseline_payload",
+    "calculate_full_mmr",
+    "calculate_single_match_mmr",
 ]
