@@ -253,7 +253,7 @@ total_mmr = round( Σ(pos_mmr × pos_games) / Σ(pos_games) )    # 전적 없으
 | `MMR_K_DECAY_START` | 1500 | K 감쇠 시작 MMR |
 | `MMR_K_DECAY_RATE` | 0.002 | K 감쇠율 |
 | `MMR_K_MIN` | 0.35 | K 하한 |
-| `DEFAULT_POSITIONS` | TOP/BOTTOM/MIDDLE/JUNGLE/UTILITY | 라이엇 원본 포지션 |
+| `DEFAULT_POSITIONS` | TOP/JUG/MID/ADC/SUP | MMR 계약 포지션 enum (`interface_spec.md`) |
 
 ---
 

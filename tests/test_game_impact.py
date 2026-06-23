@@ -21,7 +21,7 @@ from mmr.silver.game_impact import (
 def test_compute_raw_game_impact_uses_position_weights():
     df = pd.DataFrame(
         {
-            "position": ["TOP", "JUNGLE"],
+            "position": ["TOP", "JUG"],
             "kills": [10, 4],
             "assists": [2, 8],
         }
@@ -29,7 +29,7 @@ def test_compute_raw_game_impact_uses_position_weights():
     weights = pd.DataFrame(
         {
             "TOP": {"kills": 0.8, "assists": 0.2},
-            "JUNGLE": {"kills": 0.3, "assists": 0.7},
+            "JUG": {"kills": 0.3, "assists": 0.7},
         }
     )
 
@@ -63,7 +63,7 @@ def test_normalize_minmax_0_100_scales_bounds():
 def test_normalize_by_position_outcome_returns_groupwise_scores():
     df = pd.DataFrame(
         {
-            "position": ["TOP", "TOP", "TOP", "TOP", "JUNGLE", "JUNGLE"],
+            "position": ["TOP", "TOP", "TOP", "TOP", "JUG", "JUG"],
             "game_result": [1, 1, 0, 0, 1, 1],
             "raw_game_impact": [10, 20, 30, 40, 1, 2],
         }
@@ -91,7 +91,7 @@ def test_compute_n_person_contribution_sums_to_ten_per_game():
 
 
 def test_compute_n_person_contribution_balances_each_position():
-    positions = ["TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"]
+    positions = ["TOP", "JUG", "MID", "ADC", "SUP"]
     rows = []
     for position in positions:
         rows.append({"replay_code": "g1", "position": position, "game_impact_winloss_norm": 80})
@@ -109,7 +109,7 @@ def test_compute_vs_opponent_matches_same_game_and_position():
     df = pd.DataFrame(
         {
             "replay_code": ["g1", "g1", "g1", "g1"],
-            "position": ["TOP", "TOP", "JUNGLE", "JUNGLE"],
+            "position": ["TOP", "TOP", "JUG", "JUG"],
             "game_result": [1, 0, 1, 0],
             "game_impact_winloss_norm": [70, 30, 40, 60],
             "puuid": ["top_w", "top_l", "jg_w", "jg_l"],
