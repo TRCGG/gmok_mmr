@@ -34,5 +34,7 @@ def test_calculate_service_baseline_returns_serializable_payload():
     assert payload["baseline_version"] == "2026-06"
     assert payload["season"] == "2026"
     assert "f1_mean" in payload["mmr_baseline"]
+    assert "f1_position_mean" in payload["mmr_baseline"]
+    assert "TOP" in payload["mmr_baseline"]["f1_position_mean"]
     assert "TOP" in payload["game_impact_baseline"]["position_weights"]
     assert payload["game_impact_baseline"]["outcome_stats"]

@@ -65,16 +65,37 @@ DEFAULT_MMR_SETTINGS = MMRSettings()
 
 @dataclass(frozen=True)
 class MMRBaselineStats:
-    """MMR 변동 factor 계산에 사용하는 전체 기준 통계."""
+    """MMR ?? factor ??? ???? ?? ??."""
 
     f1_mean: float
     f2_mean: float
+    f1_position_mean: dict[str, float] = field(default_factory=dict)
+    f2_position_mean: dict[str, float] = field(default_factory=dict)
 
     @classmethod
     def from_df(cls, df: pd.DataFrame) -> "MMRBaselineStats":
+        if "position" in df.columns:
+            f1_position_mean = (
+                df.groupby("position")["game_n_person_contribution"]
+                .mean()
+                .astype(float)
+                .to_dict()
+            )
+            f2_position_mean = (
+                df.groupby("position")["game_impact_vs_opponent"]
+                .mean()
+                .astype(float)
+                .to_dict()
+            )
+        else:
+            f1_position_mean = {}
+            f2_position_mean = {}
+
         return cls(
             f1_mean=float(df["game_n_person_contribution"].mean()),
             f2_mean=float(df["game_impact_vs_opponent"].mean()),
+            f1_position_mean=f1_position_mean,
+            f2_position_mean=f2_position_mean,
         )
 
 
@@ -153,20 +174,26 @@ def calculate_personal_factor(
     row: pd.Series,
     f1_mean: float,
     f2_mean: float,
+    f1_position_mean: dict[str, float] | None = None,
+    f2_position_mean: dict[str, float] | None = None,
     settings: MMRSettings = DEFAULT_MMR_SETTINGS,
 ) -> float:
-    """개인 기여도 factor.
+    """?? ??? factor.
 
-    - f1: game_n_person_contribution / 평균
-    - f2: game_impact_vs_opponent / 평균 (NaN이면 1)
-    각각 [0.5, 2]로 클램프한 뒤 (f1**ALPHA) * (f2**BETA)를 반환한다.
+    - f1: game_n_person_contribution / ?? ??
+    - f2: game_impact_vs_opponent / ?? ?? (NaN?? 1)
+    position? baseline? ??? ?? ???? ?? ????.
     """
-    f1 = row["game_n_person_contribution"] / f1_mean if f1_mean != 0 else 1
+    position = row.get("position")
+    f1_baseline = (f1_position_mean or {}).get(position, f1_mean)
+    f2_baseline = (f2_position_mean or {}).get(position, f2_mean)
 
-    if pd.isna(row["game_impact_vs_opponent"]) or f2_mean == 0:
+    f1 = row["game_n_person_contribution"] / f1_baseline if f1_baseline != 0 else 1
+
+    if pd.isna(row["game_impact_vs_opponent"]) or f2_baseline == 0:
         f2 = 1
     else:
-        f2 = row["game_impact_vs_opponent"] / f2_mean
+        f2 = row["game_impact_vs_opponent"] / f2_baseline
 
     f1 = np.clip(f1, 0.5, 2)
     f2 = np.clip(f2, 0.5, 2)
@@ -388,6 +415,8 @@ def _apply_mmr_game(
             row,
             baseline.f1_mean,
             baseline.f2_mean,
+            f1_position_mean=baseline.f1_position_mean,
+            f2_position_mean=baseline.f2_position_mean,
             settings=settings,
         )
         final_factor = personal_factor * (relative_factor ** settings.gamma)

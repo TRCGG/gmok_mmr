@@ -90,6 +90,21 @@ def test_compute_n_person_contribution_sums_to_ten_per_game():
     assert np.isclose(out[df["replay_code"] == "g2"].sum(), 10)
 
 
+def test_compute_n_person_contribution_balances_each_position():
+    positions = ["TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"]
+    rows = []
+    for position in positions:
+        rows.append({"replay_code": "g1", "position": position, "game_impact_winloss_norm": 80})
+        rows.append({"replay_code": "g1", "position": position, "game_impact_winloss_norm": 20})
+    df = pd.DataFrame(rows)
+
+    out = compute_n_person_contribution(df)
+
+    assert np.isclose(out.sum(), 10)
+    position_totals = out.groupby(df["position"]).sum()
+    assert all(np.isclose(position_totals[position], 2) for position in positions)
+
+
 def test_compute_vs_opponent_matches_same_game_and_position():
     df = pd.DataFrame(
         {

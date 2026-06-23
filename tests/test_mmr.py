@@ -10,6 +10,7 @@ from mmr.gold.mmr import (
     MMRRuntimeState,
     MMRSettings,
     calculate_k_factor,
+    calculate_personal_factor,
     expected_performance,
     make_summary_df_wide,
     update_mmr_elo,
@@ -64,6 +65,26 @@ def test_calculate_k_factor_accepts_custom_settings():
     settings = MMRSettings(k_decay_start=1000, k_decay_rate=0.01, k_min=0.2)
 
     assert calculate_k_factor(1100, settings=settings) == 0.2
+
+
+def test_calculate_personal_factor_prefers_position_baseline():
+    row = pd.Series({
+        "position": "UTILITY",
+        "game_n_person_contribution": 1.2,
+        "game_impact_vs_opponent": 55.0,
+    })
+
+    overall_based = calculate_personal_factor(row, f1_mean=1.0, f2_mean=50.0)
+    position_based = calculate_personal_factor(
+        row,
+        f1_mean=1.0,
+        f2_mean=50.0,
+        f1_position_mean={"UTILITY": 1.2},
+        f2_position_mean={"UTILITY": 55.0},
+    )
+
+    assert position_based == pytest.approx(1.0)
+    assert overall_based > position_based
 
 
 def test_validate_mmr_input_matches_accepts_valid_ten_player_match():
