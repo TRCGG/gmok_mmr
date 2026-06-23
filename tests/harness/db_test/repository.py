@@ -23,22 +23,33 @@ def load_match_dataframe_from_db(guild_id: str | None = None) -> pd.DataFrame:
 
     Args:
         guild_id: 지정 시 해당 guild의 경기만 읽는다. None이면 전체.
+
+    NOTE: ``is_deleted = false`` 와 ``is_mmr_eligible = true`` 행만 읽는다.
+
+    식별자(``puuid`` 컬럼)는 db_test 전용으로 **player_code 기준으로 통합**한다.
+    같은 사람의 부캐(다른 puuid, 같은 player_code)를 하나로 합쳐 MMR을 계산하기
+    위함이다. participant.player_code 가 NULL 이면 riot_account 로 보강하고, 그래도
+    없으면 원본 puuid 를 쓴다. (운영 API 경로는 매핑하지 않고 백엔드가 보낸
+    식별자로 계산만 한다.)
     """
     engine = create_engine(get_db_url())
     player_game_table = get_player_game_table()
-    where_clause = "WHERE pg.guild_id = :guild_id" if guild_id is not None else ""
+    conditions = ["pg.is_deleted = false", "pg.is_mmr_eligible = true"]
+    if guild_id is not None:
+        conditions.append("pg.guild_id = :guild_id")
+    where_clause = "WHERE " + " AND ".join(conditions)
 
     query = text(
         f"""
         SELECT
             pg.id                                           AS player_game_id,
-            pg.replay_code                                  AS replay_code,
-            pg.puuid                                        AS puuid,
+            pg.custom_match_id                              AS replay_code,
+            COALESCE(pg.player_code, ra.player_code, pg.puuid) AS puuid,
             pg.guild_id                                     AS guild_id,
             pg.champion_id                                 AS champion_id,
-            pg.team                                        AS team,
+            pg.game_team                                   AS team,
             pg.position                                    AS position,
-            pg.win                                         AS win,
+            pg.game_result                                 AS game_result,
             pg.kills                                       AS kills,
             pg.deaths                                      AS deaths,
             pg.assists                                     AS assists,
@@ -88,9 +99,10 @@ def load_match_dataframe_from_db(guild_id: str | None = None) -> pd.DataFrame:
             pg.retreat_pings                                AS retreat_pings,
             pg.on_my_way_pings                              AS on_my_way_pings,
             pg.command_pings                                AS command_pings,
-            pg.created_at                                   AS created_at,
-            pg.played_at                                   AS played_at
+            pg.create_date                                  AS created_at,
+            pg.played_date                                 AS played_at
         FROM {player_game_table} pg
+        LEFT JOIN riot_account ra ON ra.puuid = pg.puuid
         {where_clause}
         """
     )
