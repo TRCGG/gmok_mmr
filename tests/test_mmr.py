@@ -20,7 +20,7 @@ from mmr.gold.mmr import (
 )
 
 
-POSITIONS = ("TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY")
+POSITIONS = ("TOP", "JUG", "MID", "ADC", "SUP")
 
 
 def _valid_mmr_input() -> pd.DataFrame:
@@ -69,7 +69,7 @@ def test_calculate_k_factor_accepts_custom_settings():
 
 def test_calculate_personal_factor_prefers_position_baseline():
     row = pd.Series({
-        "position": "UTILITY",
+        "position": "SUP",
         "game_n_person_contribution": 1.2,
         "game_impact_vs_opponent": 55.0,
     })
@@ -79,8 +79,8 @@ def test_calculate_personal_factor_prefers_position_baseline():
         row,
         f1_mean=1.0,
         f2_mean=50.0,
-        f1_position_mean={"UTILITY": 1.2},
-        f2_position_mean={"UTILITY": 55.0},
+        f1_position_mean={"SUP": 1.2},
+        f2_position_mean={"SUP": 55.0},
     )
 
     assert position_based == pytest.approx(1.0)

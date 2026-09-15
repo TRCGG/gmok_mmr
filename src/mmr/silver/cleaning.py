@@ -67,7 +67,7 @@ def find_rows_with_na(
 
 def drop_invalid_matches(
     df: pd.DataFrame,
-    positions: tuple[str, ...] = ("TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"),
+    positions: tuple[str, ...] = ("TOP", "JUG", "MID", "ADC", "SUP"),
     replay_code_col: str = "replay_code",
     position_col: str = "position",
     result_col: str = "game_result",

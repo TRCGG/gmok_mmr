@@ -38,7 +38,7 @@ MMR_K_DECAY_RATE: float = 0.002
 MMR_K_MIN: float = 0.35
 
 DEFAULT_POSITIONS: tuple[str, ...] = (
-    "TOP", "BOTTOM", "MIDDLE", "JUNGLE", "UTILITY",
+    "TOP", "JUG", "MID", "ADC", "SUP",
 )
 
 
