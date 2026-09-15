@@ -199,6 +199,14 @@ def _baseline_from_payload(payload: dict[str, Any] | None) -> MMRBaselineStats:
     return MMRBaselineStats(
         f1_mean=float(payload["f1_mean"]),
         f2_mean=float(payload["f2_mean"]),
+        f1_position_mean={
+            str(position): float(value)
+            for position, value in payload.get("f1_position_mean", {}).items()
+        },
+        f2_position_mean={
+            str(position): float(value)
+            for position, value in payload.get("f2_position_mean", {}).items()
+        },
     )
 
 

@@ -336,11 +336,33 @@ def compute_n_person_contribution(
     df: pd.DataFrame,
     norm_col: str = "game_impact_winloss_norm",
     game_id_col: str = "replay_code",
+    position_col: str = "position",
     players_per_game: int = 10,
 ) -> pd.Series:
-    """게임별 norm 합을 기준으로 본인 비중 × 10 (인분 환산)."""
-    game_wide_sum = df.groupby(game_id_col)[norm_col].transform("sum")
-    return (df[norm_col] / game_wide_sum * players_per_game).fillna(0)
+    """?? ? ???? ?? ??? ????.
+
+    ???? ?? ?? ??? MMR? ???? ??? position ??? ???
+    ?? ??? ? ??? ??? ??? ??? ??? ?? ????. ??
+    5??? ????? ???? ??? 2, ?? ?? ??? 10? ??.
+    """
+    if position_col not in df.columns:
+        game_wide_sum = df.groupby(game_id_col)[norm_col].transform("sum")
+        return (df[norm_col] / game_wide_sum * players_per_game).fillna(0)
+
+    group_cols = [game_id_col, position_col]
+    position_sum = df.groupby(group_cols)[norm_col].transform("sum")
+    positions_per_game = df.groupby(game_id_col)[position_col].transform("nunique")
+    position_target = players_per_game / positions_per_game.replace(0, np.nan)
+
+    contribution = df[norm_col] / position_sum * position_target
+
+    zero_or_missing_sum = position_sum.isna() | np.isclose(position_sum, 0)
+    if zero_or_missing_sum.any():
+        players_per_position = df.groupby(group_cols)[norm_col].transform("size")
+        fallback = position_target / players_per_position.replace(0, np.nan)
+        contribution = contribution.mask(zero_or_missing_sum, fallback)
+
+    return contribution.fillna(0)
 
 
 def compute_vs_opponent(

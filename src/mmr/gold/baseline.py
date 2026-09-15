@@ -62,6 +62,8 @@ def service_baseline_to_payload(
         "mmr_baseline": {
             "f1_mean": baseline.mmr_baseline.f1_mean,
             "f2_mean": baseline.mmr_baseline.f2_mean,
+            "f1_position_mean": baseline.mmr_baseline.f1_position_mean,
+            "f2_position_mean": baseline.mmr_baseline.f2_position_mean,
         },
         "game_impact_baseline": game_impact_baseline_to_payload(
             baseline.game_impact_baseline
