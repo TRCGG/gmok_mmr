@@ -3,16 +3,20 @@
 > **목적**: MMR 계산 입력이 되는 경기 참가자별 스탯 테이블 정의. 현재는 MMR 레포의 SQL 마이그레이션(`migrations/004`, `006`)으로 생성하지만, **운영에서는 백엔드가 리플레이 적재 시 이 구조로 저장**한다.
 > **단위**: 한 row = 한 경기의 한 참가자(player-game). 한 경기 = 정확히 10 row.
 > **출처**: raw 지표는 `replay.raw_data`(JSONB 배열) 파싱, 파생지표는 raw에서 계산.
-> **검증 기준**: 2026-06-18 현재 `src/mmr` 소스 기준.
+> **검증 기준**: 2026-06-23 현재 `src/mmr` 소스 기준.
 
-> **테이블명 매핑(현재 상태)**: `match_participant_metric`은 **운영 목표 테이블명**이다. 현재 DB 테스트 단계의 실제 테이블은 다음과 같다.
-> | 역할 | 실제 테이블 | 비고 |
-> |---|---|---|
-> | 신포맷 적재 | `player_game_stats` | `migrations/003`/`004`/`006` |
-> | 구포맷 적재 | `player_game_stats_old` | 동일 |
-> | MMR 로더가 읽는 테이블 | env `MMR_PLAYER_GAME_TABLE` (기본 `player_game`) | `tests/harness/db_test/repository.py`가 SELECT |
+> **테이블명 매핑(현재 상태)**: `match_participant_metric`은 **운영 목표 테이블명**이다. 현재 DB 테스트 단계에서 MMR 로더가 실제로 읽는 테이블은 `mmr_participant_metric`(env `MMR_PLAYER_GAME_TABLE`)이며, 컬럼명이 이 정의서와 일부 다르다. 로더(`tests/harness/db_test/repository.py`)가 SELECT 시 alias로 맞춘다.
+> | 실제 컬럼(`mmr_participant_metric`) | 정의서/파이프라인 명 |
+> |---|---|
+> | `custom_match_id` | `replay_code` |
+> | `game_team` | `team` |
+> | `game_result` (1/0) | `game_result` (그대로) |
+> | `create_date` | `created_at` |
+> | `played_date` | `played_at` |
+> | `gold_earned` | `gold` |
+> | `control_wards_bought` | `vision_bought` |
 >
-> 백엔드 연동이 끝나면 이 정의서의 `match_participant_metric` 구조로 통일한다.
+> 또한 로더는 `is_deleted=false AND is_mmr_eligible=true` 행만 읽고, MMR 계산 식별자로 `puuid` 대신 **`player_code`**(부캐 통합 키, participant.player_code가 NULL이면 `riot_account`로 보강)를 사용한다. 백엔드 연동이 끝나면 이 정의서의 `match_participant_metric` 구조로 통일한다.
 
 ---
 
@@ -34,20 +38,28 @@
 
 ### 2.1 식별 / 메타
 
+실제 테이블(`mmr_participant_metric`) 기준. 괄호는 로더 alias.
+
 | 컬럼 | 타입 | NULL | 설명 |
 |---|---|---|---|
-| `id` | BIGSERIAL | NOT NULL | PK |
-| `replay_code` | VARCHAR(128) | NOT NULL | 경기 식별자 (`league/replay.game_id`) |
-| `puuid` | VARCHAR(64) | NOT NULL | 유저 식별자 |
-| `guild_id` | VARCHAR(64) | NULL | 길드 |
+| `id` | BIGINT | NOT NULL | PK |
+| `custom_match_id` | VARCHAR(255) | NOT NULL | 경기 식별자 (로더 alias: `replay_code`) |
+| `puuid` | VARCHAR(128) | NOT NULL | 라이엇 계정 식별자 |
+| `player_code` | VARCHAR(64) | NULL | 유저(사람) 식별자 — 부캐 통합 키. **로더가 MMR 계산 식별자로 사용** (NULL이면 `riot_account`로 보강) |
+| `guild_id` | VARCHAR(128) | NOT NULL | 길드 |
+| `season` | VARCHAR(32) | NOT NULL | 시즌 |
 | `champion_id` | VARCHAR(16) | NULL | 챔피언 id (`SKIN` → Champion 테이블 매핑) |
-| `team` | VARCHAR(8) | NULL | 팀 (raw `TEAM`) |
-| `position` | VARCHAR(16) | NULL | 포지션 — 라이엇 원본값 `TOP`/`JUNGLE`/`MIDDLE`/`BOTTOM`/`UTILITY` |
-| `win` | BOOLEAN | NULL | 승패 (`WIN = 'Win'` → true) |
-| `played_date` | TIMESTAMP | NULL | 경기 플레이 시각 (MMR 누적 순서 기준) |
-| `create_date` | TIMESTAMP | NOT NULL | 적재 시각 (default now) |
+| `game_team` | VARCHAR(8) | NOT NULL | 팀 (로더 alias: `team`) |
+| `position` | VARCHAR(8) | NOT NULL | 포지션 — `TOP`/`JUG`/`MID`/`ADC`/`SUP` |
+| `game_result` | SMALLINT | NOT NULL | 승패 (1=승, 0=패) |
+| `is_mmr_eligible` | BOOLEAN | NOT NULL | MMR 산정 대상 여부 (로더는 `true`만 읽음) |
+| `is_deleted` | BOOLEAN | NOT NULL | 삭제 여부 (로더는 `false`만 읽음) |
+| `played_date` | TIMESTAMP | NOT NULL | 경기 플레이 시각 (로더 alias: `played_at`, MMR 누적 순서 기준) |
+| `create_date` | TIMESTAMP | NOT NULL | 적재 시각 (로더 alias: `created_at`) |
+| `update_date` | TIMESTAMP | NOT NULL | 갱신 시각 |
 
-> **포지션 표기 주의**: 이 테이블은 라이엇 원본값(`JUNGLE/MIDDLE/BOTTOM/UTILITY`)을 저장한다. MMR 계약(`interface_spec.md`)의 enum(`JUG/MID/ADC/SUP`)으로의 변환은 MMR 서비스 전달 직전에 수행한다.
+> **포지션 표기**: 이 테이블은 MMR 계약(`interface_spec.md`) enum(`TOP/JUG/MID/ADC/SUP`)을 그대로 저장한다(별도 변환 불필요). 코어(`DEFAULT_POSITIONS`)도 동일 enum을 사용한다.
+> **식별자**: db_test 계산은 `player_code` 기준으로 통합한다(부캐=같은 player_code → 1명). 운영 계약의 식별자는 `puuid`이며(`interface_spec.md`), player_code 통합은 db_test 로더 단계에서만 수행한다.
 
 ### 2.2 raw 지표 (replay.raw_data JSON 파싱)
 
@@ -189,19 +201,20 @@ lane_gold_diff    = gold_earned - opponent_gold        -- 계산 불가 시 0
 한 경기(`replay_code`)는 MMR 계산 대상이 되려면:
 
 - 정확히 **10 row**
-- 포지션별 정확히 **2 row** (TOP/JUNGLE/MIDDLE/BOTTOM/UTILITY 각 2)
-- 각 `(position, win)` 조합마다 승자 1·패자 1
-- 같은 경기 내 `puuid` 중복 없음
+- 포지션별 정확히 **2 row** (TOP/JUG/MID/ADC/SUP 각 2)
+- 각 `(position, game_result)` 조합마다 승자 1·패자 1
+- 같은 경기 내 식별자(`player_code`) 중복 없음
 
-> 위반 경기는 MMR 부적격(백엔드 `is_mmr_eligible=false`) 처리. 적재 자체는 가능하나 MMR 계산에서 제외.
+> 위반 경기는 MMR 부적격(`is_mmr_eligible=false`) 처리. 적재 자체는 가능하나 MMR 계산에서 제외.
+> MMR 로더는 `is_deleted=false AND is_mmr_eligible=true` 조건으로만 행을 읽는다.
 
 ---
 
 ## 5. 인덱스 (권장)
 
 ```sql
-CREATE INDEX ON match_participant_metric (replay_code);
-CREATE INDEX ON match_participant_metric (puuid);
+CREATE INDEX ON match_participant_metric (custom_match_id);
+CREATE INDEX ON match_participant_metric (player_code);
 CREATE INDEX ON match_participant_metric (guild_id);
 ```
 
@@ -212,13 +225,17 @@ CREATE INDEX ON match_participant_metric (guild_id);
 ```sql
 CREATE TABLE match_participant_metric (
     id                              BIGSERIAL    PRIMARY KEY,
-    replay_code                     VARCHAR(128) NOT NULL,
-    puuid                           VARCHAR(64)  NOT NULL,
-    guild_id                        VARCHAR(64),
+    custom_match_id                 VARCHAR(255) NOT NULL,
+    puuid                           VARCHAR(128) NOT NULL,
+    player_code                     VARCHAR(64),
+    guild_id                        VARCHAR(128) NOT NULL,
+    season                          VARCHAR(32)  NOT NULL,
     champion_id                     VARCHAR(16),
-    team                            VARCHAR(8),
-    position                        VARCHAR(16),
-    win                             BOOLEAN,
+    game_team                       VARCHAR(8)   NOT NULL,
+    position                        VARCHAR(8)   NOT NULL,
+    game_result                     SMALLINT     NOT NULL,
+    is_mmr_eligible                 BOOLEAN      NOT NULL,
+    is_deleted                      BOOLEAN      NOT NULL,
     -- raw 지표 (§2.2)
     kills INTEGER, deaths INTEGER, assists INTEGER,
     double_kills INTEGER, triple_kills INTEGER, quadra_kills INTEGER, penta_kills INTEGER,
@@ -245,8 +262,9 @@ CREATE TABLE match_participant_metric (
     kda NUMERIC, damage_taken_per_death NUMERIC, damage_dealt_per_death NUMERIC,
     dead_time_pct NUMERIC, lane_gold_diff NUMERIC,
     -- 메타
-    played_date                     TIMESTAMP,
-    create_date                     TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
+    played_date                     TIMESTAMP    NOT NULL,
+    create_date                     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_date                     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 -- 파생지표(NUMERIC)는 full precision으로 저장한다 (반올림 금지, §3)
 ```

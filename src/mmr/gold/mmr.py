@@ -65,7 +65,7 @@ DEFAULT_MMR_SETTINGS = MMRSettings()
 
 @dataclass(frozen=True)
 class MMRBaselineStats:
-    """MMR ?? factor ??? ???? ?? ??."""
+    """MMR 변동 factor 계산에 사용하는 전체 기준 통계."""
 
     f1_mean: float
     f2_mean: float
@@ -178,11 +178,11 @@ def calculate_personal_factor(
     f2_position_mean: dict[str, float] | None = None,
     settings: MMRSettings = DEFAULT_MMR_SETTINGS,
 ) -> float:
-    """?? ??? factor.
+    """개인 기여도 factor.
 
-    - f1: game_n_person_contribution / ?? ??
-    - f2: game_impact_vs_opponent / ?? ?? (NaN?? 1)
-    position? baseline? ??? ?? ???? ?? ????.
+    - f1: game_n_person_contribution / 기준 평균
+    - f2: game_impact_vs_opponent / 기준 평균 (NaN이면 1)
+    position별 baseline이 있으면 우선 적용하고, 없으면 전체 평균을 사용한다.
     """
     position = row.get("position")
     f1_baseline = (f1_position_mean or {}).get(position, f1_mean)

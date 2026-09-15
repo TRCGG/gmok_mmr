@@ -95,13 +95,15 @@
 
 ## 6. 포지션 상수 중복 정의 — 중간 / 수치 영향 없음
 
-**위치**: [gold/mmr.py:40](../src/mmr/gold/mmr.py#L40) `DEFAULT_POSITIONS = (TOP, BOTTOM, MIDDLE, JUNGLE, UTILITY)` vs [silver/cleaning.py:70](../src/mmr/silver/cleaning.py#L70) `("TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY")`
+**위치**: [gold/mmr.py:40](../src/mmr/gold/mmr.py#L40) `DEFAULT_POSITIONS = (TOP, JUG, MID, ADC, SUP)` vs [silver/cleaning.py:70](../src/mmr/silver/cleaning.py#L70) `("TOP", "JUG", "MID", "ADC", "SUP")`
 
-**현상**: 5개 포지션 집합이 두 곳에 따로 정의되어 있고 순서도 다르다.
+**현상**: 5개 포지션 집합이 두 곳에 따로 정의되어 있다.
 
 **영향**: 포지션 enum이 바뀌면(예: 라이엇 표기→계약 표기 전환) 한 곳만 고칠 위험.
 
 **제안**: 단일 상수(`POSITIONS`)를 공용 모듈에 두고 양쪽이 참조. 집합 비교라 순서 무관하지만 정의를 통일.
+
+> **진행(2026-06-23)**: enum을 계약 표기 `TOP/JUG/MID/ADC/SUP`로 **양쪽 통일 완료**(라이엇↔계약 enum 갭 해소). 다만 두 곳에 따로 정의된 **구조적 중복은 미해결** — 단일 상수화는 후속 과제로 남음.
 
 ---
 

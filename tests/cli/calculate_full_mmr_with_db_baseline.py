@@ -72,8 +72,17 @@ def main() -> None:
             }
         )
 
-        match_results = pd.DataFrame(result["match_results"])
-        user_summary = pd.DataFrame(result["user_summary"])
+        # db_test 전용: 계산 식별자(코어의 ``puuid`` 컬럼)에는 player_code 가 담겨
+        # 있으므로, 출력 컬럼명을 player_code 로 바꿔 의미를 맞춘다.
+        match_results = pd.DataFrame(result["match_results"]).rename(
+            columns={"puuid": "player_code"}
+        )
+        user_summary = pd.DataFrame(result["user_summary"]).rename(
+            columns={"puuid": "player_code"}
+        )
+        # summary 출력엔 guild_id 가 없으므로 실행 길드 값을 stamp 한다.
+        # (전역 실행이면 guild_id=None → NULL 저장)
+        user_summary["guild_id"] = args.guild_id
 
         logger.set_counts(
             match_count=result["metadata"]["match_count"],
