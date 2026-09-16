@@ -74,21 +74,21 @@ CREATE TABLE IF NOT EXISTS mmr_user_summary (
     top_winrate NUMERIC,
     top_games INTEGER,
 
-    bottom_mmr NUMERIC,
-    bottom_winrate NUMERIC,
-    bottom_games INTEGER,
+    adc_mmr NUMERIC,
+    adc_winrate NUMERIC,
+    adc_games INTEGER,
 
-    middle_mmr NUMERIC,
-    middle_winrate NUMERIC,
-    middle_games INTEGER,
+    mid_mmr NUMERIC,
+    mid_winrate NUMERIC,
+    mid_games INTEGER,
 
-    jungle_mmr NUMERIC,
-    jungle_winrate NUMERIC,
-    jungle_games INTEGER,
+    jug_mmr NUMERIC,
+    jug_winrate NUMERIC,
+    jug_games INTEGER,
 
-    utility_mmr NUMERIC,
-    utility_winrate NUMERIC,
-    utility_games INTEGER,
+    sup_mmr NUMERIC,
+    sup_winrate NUMERIC,
+    sup_games INTEGER,
 
     calculated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
