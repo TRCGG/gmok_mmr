@@ -20,6 +20,10 @@ except ImportError:
 
 def get_db_url() -> str:
     """환경변수로 SQLAlchemy PostgreSQL 접속 URL을 만든다."""
+    database_url = os.environ.get("DATABASE_URL")
+    if database_url:
+        return database_url
+
     user = os.environ["DB_USER"]
     password = os.environ["DB_PASSWORD"]
     host = os.environ.get("DB_HOST", "localhost")

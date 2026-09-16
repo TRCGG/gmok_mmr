@@ -40,6 +40,13 @@ def test_config_environment_overrides(monkeypatch):
     assert db_config.get_player_table() == "custom_player"
 
 
+def test_database_url_overrides_individual_db_settings(monkeypatch):
+    database_url = "postgresql+psycopg2://runner:secret@prod.example/league"
+    monkeypatch.setenv("DATABASE_URL", database_url)
+
+    assert db_config.get_db_url() == database_url
+
+
 def test_config_rejects_unsafe_table_names(monkeypatch):
     monkeypatch.setenv("MMR_PLAYER_GAME_TABLE", "player_game;drop")
 

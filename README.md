@@ -106,7 +106,7 @@ MMR_SUMMARY_TABLE=mmr_user_summary
 
 ```bash
 psql -d <DB_NAME> -f migrations/001_create_mmr_result_tables.sql
-psql -d <DB_NAME> -f migrations/002_drop_player_game_id_from_mmr_match_results.sql
+psql -d <DB_NAME> -f migrations/003_alter_tables.sql
 ```
 
 현재 결과 저장 테이블은 계산 결과 중심 컬럼만 저장합니다. DB 조회 단계에서는 원본 notebook 기준 Game Impact metric을 맞추기 위해 더 많은 raw/derived 컬럼을 사용하지만, 저장 시에는 실제 결과 테이블에 존재하는 컬럼만 저장됩니다.
