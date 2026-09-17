@@ -109,7 +109,7 @@ def main() -> None:
     )
 
     match_results = _prepare_match_results(result["match_results"], guild_id)
-    user_summary = _prepare_user_summary(result["user_summary"], guild_id)
+    user_summary = _prepare_user_summary(result["user_summary"], match_results)
     report = _build_report(
         result=result,
         baseline_payload=baseline_payload,
@@ -147,12 +147,19 @@ def _prepare_match_results(rows: list[dict[str, Any]], guild_id: str | None):
     return out
 
 
-def _prepare_user_summary(rows: list[dict[str, Any]], guild_id: str | None):
+def _prepare_user_summary(rows: list[dict[str, Any]], match_results):
     import pandas as pd
 
     out = pd.DataFrame(rows).rename(columns={"puuid": "player_code"})
-    out["guild_id"] = guild_id
-    return out
+    # The MMR values are calculated across all guilds. Repeat each user's
+    # combined summary for every guild represented in the calculated matches.
+    memberships = match_results[["player_code", "guild_id"]].drop_duplicates()
+    if memberships["guild_id"].isna().any():
+        raise RuntimeError("Calculated matches contain missing guild_id values.")
+    missing = set(out["player_code"]) - set(memberships["player_code"])
+    if missing:
+        raise RuntimeError(f"No calculated guild membership for {len(missing)} user(s).")
+    return out.merge(memberships, on="player_code", how="left", validate="one_to_many")
 
 
 def _build_report(
@@ -171,7 +178,8 @@ def _build_report(
         "baseline_version": result.get("baseline_version"),
         "metadata": {
             **result["metadata"],
-            "user_count": len(user_summary),
+            "user_count": int(user_summary["player_code"].nunique()),
+            "summary_row_count": len(user_summary),
         },
         "baseline_metadata": baseline_payload["metadata"],
         "match_results": match_results.to_dict(orient="records"),
