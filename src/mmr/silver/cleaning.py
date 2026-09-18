@@ -83,28 +83,30 @@ def drop_invalid_matches(
     if df.empty:
         return df
 
-    invalid_codes: set[str] = set()
+    game_keys = ["guild_id", replay_code_col]
+    invalid_codes: set[tuple[str, str]] = set()
 
-    game_counts = df.groupby(replay_code_col).size()
+    game_counts = df.groupby(game_keys).size()
     invalid_codes.update(
         game_counts[game_counts != expected_players].index.tolist()
     )
 
-    pos_counts = df.groupby([replay_code_col, position_col]).size()
+    pos_counts = df.groupby([*game_keys, position_col]).size()
     invalid_codes.update(
-        pos_counts[pos_counts != 2].reset_index()[replay_code_col].tolist()
+        pos_counts[pos_counts != 2].index.droplevel(-1).tolist()
     )
 
     if result_col in df.columns:
-        pos_result_sums = df.groupby([replay_code_col, position_col])[result_col].sum()
+        pos_result_sums = df.groupby([*game_keys, position_col])[result_col].sum()
         invalid_codes.update(
-            pos_result_sums[pos_result_sums != 1].reset_index()[replay_code_col].tolist()
+            pos_result_sums[pos_result_sums != 1].index.droplevel(-1).tolist()
         )
 
     if invalid_codes:
         print(
             f"[drop_invalid_matches] 유효하지 않은 경기 {len(invalid_codes)}건 제외: "
-            + ", ".join(sorted(invalid_codes))
+            + ", ".join(f"{guild}/{replay}" for guild, replay in sorted(invalid_codes))
         )
 
-    return df[~df[replay_code_col].isin(invalid_codes)].copy()
+    row_games = pd.MultiIndex.from_frame(df[game_keys])
+    return df[~row_games.isin(invalid_codes)].copy()

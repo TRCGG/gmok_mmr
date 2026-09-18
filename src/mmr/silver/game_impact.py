@@ -346,13 +346,14 @@ def compute_n_person_contribution(
     합을 기준으로 기존 방식(본인 비중 × 10)을 사용한다.
     5개 포지션이면 포지션당 목표 비중은 2, 한 게임 전체 합은 10이 된다.
     """
+    game_cols = ["guild_id", game_id_col] if "guild_id" in df.columns else [game_id_col]
     if position_col not in df.columns:
-        game_wide_sum = df.groupby(game_id_col)[norm_col].transform("sum")
+        game_wide_sum = df.groupby(game_cols)[norm_col].transform("sum")
         return (df[norm_col] / game_wide_sum * players_per_game).fillna(0)
 
-    group_cols = [game_id_col, position_col]
+    group_cols = [*game_cols, position_col]
     position_sum = df.groupby(group_cols)[norm_col].transform("sum")
-    positions_per_game = df.groupby(game_id_col)[position_col].transform("nunique")
+    positions_per_game = df.groupby(game_cols)[position_col].transform("nunique")
     position_target = players_per_game / positions_per_game.replace(0, np.nan)
 
     contribution = df[norm_col] / position_sum * position_target
@@ -372,20 +373,21 @@ def compute_vs_opponent(
     game_id_col: str = "replay_code",
     position_col: str = "position",
     result_col: str = "game_result",
-    puuid_col: str = "puuid",
+    player_code_col: str = "player_code",
 ) -> pd.Series:
     """동일 (game, position) 내 승/패 1:1 비교에서 본인 비중(0~100) 반환.
 
     같은 (game, position) 그룹에 winner/loser 가 모두 존재해야 매칭된다.
     매칭되지 않은 row 는 NaN.
     """
-    df_comp = df[[game_id_col, position_col, result_col, norm_col, puuid_col]].copy()
+    game_cols = ["guild_id", game_id_col] if "guild_id" in df.columns else [game_id_col]
+    df_comp = df[[*game_cols, position_col, result_col, norm_col, player_code_col]].copy()
     df_comp["_row_id"] = df.index
 
     merged = pd.merge(
         df_comp[df_comp[result_col] == 1],
         df_comp[df_comp[result_col] == 0],
-        on=[game_id_col, position_col],
+        on=[*game_cols, position_col],
         suffixes=("_winner", "_loser"),
         how="inner",
     )
@@ -404,16 +406,16 @@ def compute_vs_opponent(
     for _, r in merged.iterrows():
         rows.append({
             "_row_id": r["_row_id_winner"],
-            game_id_col: r[game_id_col],
+            **{col: r[col] for col in game_cols},
             position_col: r[position_col],
-            puuid_col: r[f"{puuid_col}_winner"],
+            player_code_col: r[f"{player_code_col}_winner"],
             "game_impact_vs_opponent": r["winner_score"],
         })
         rows.append({
             "_row_id": r["_row_id_loser"],
-            game_id_col: r[game_id_col],
+            **{col: r[col] for col in game_cols},
             position_col: r[position_col],
-            puuid_col: r[f"{puuid_col}_loser"],
+            player_code_col: r[f"{player_code_col}_loser"],
             "game_impact_vs_opponent": r["loser_score"],
         })
 

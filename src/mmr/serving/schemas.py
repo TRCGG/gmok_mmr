@@ -39,6 +39,7 @@ class PlayerGameRow(BaseModel):
     guild_id: str
     season: str
     puuid: str
+    player_code: str
     champion_id: str
     game_team: GameTeam
     position: Position
@@ -112,7 +113,7 @@ class UserPositionState(BaseModel):
 
 
 class PreMatchUserSummary(BaseModel):
-    puuid: str
+    player_code: str
     positions: list[UserPositionState]
 
 
@@ -131,7 +132,7 @@ class MatchCalculateRequest(BaseModel):
 class MatchResultRow(BaseModel):
     custom_match_id: str
     match_participant_id: int
-    puuid: str
+    player_code: str
     position: Position
     game_result: GameResult
     pre_game_mmr: int

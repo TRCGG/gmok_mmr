@@ -81,7 +81,7 @@ def main() -> None:
     )
     baseline_payload = service_baseline_to_payload(
         baseline,
-        match_count=feature_df["replay_code"].nunique(),
+        match_count=feature_df[["guild_id", "replay_code"]].drop_duplicates().shape[0],
         player_game_row_count=len(feature_df),
     )
     baseline_payload["metadata"]["guild_id"] = guild_id
@@ -141,25 +141,31 @@ def _required_env(name: str) -> str:
 def _prepare_match_results(rows: list[dict[str, Any]], guild_id: str | None):
     import pandas as pd
 
-    out = pd.DataFrame(rows).rename(columns={"puuid": "player_code"})
-    if guild_id is not None:
-        out["guild_id"] = guild_id
+    out = pd.DataFrame(rows)
+    if out["guild_id"].isna().any():
+        raise RuntimeError("Calculated matches contain missing guild_id values.")
+    if guild_id is not None and not out["guild_id"].eq(guild_id).all():
+        raise RuntimeError("Calculated matches contain a different guild_id than requested.")
     return out
 
 
 def _prepare_user_summary(rows: list[dict[str, Any]], match_results):
     import pandas as pd
 
-    out = pd.DataFrame(rows).rename(columns={"puuid": "player_code"})
-    # The MMR values are calculated across all guilds. Repeat each user's
-    # combined summary for every guild represented in the calculated matches.
-    memberships = match_results[["player_code", "guild_id"]].drop_duplicates()
-    if memberships["guild_id"].isna().any():
-        raise RuntimeError("Calculated matches contain missing guild_id values.")
-    missing = set(out["player_code"]) - set(memberships["player_code"])
-    if missing:
-        raise RuntimeError(f"No calculated guild membership for {len(missing)} user(s).")
-    return out.merge(memberships, on="player_code", how="left", validate="one_to_many")
+    out = pd.DataFrame(rows)
+    if out[["guild_id", "player_code"]].isna().any().any():
+        raise RuntimeError("Calculated summaries require guild_id and player_code.")
+    valid_keys = match_results[["guild_id", "player_code"]].drop_duplicates()
+    checked = out.merge(
+        valid_keys,
+        on=["guild_id", "player_code"],
+        how="left",
+        indicator=True,
+        validate="one_to_one",
+    )
+    if checked["_merge"].ne("both").any():
+        raise RuntimeError("Calculated summary contains a player/guild absent from matches.")
+    return out
 
 
 def _build_report(

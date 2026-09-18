@@ -26,11 +26,9 @@ def load_match_dataframe_from_db(guild_id: str | None = None) -> pd.DataFrame:
 
     NOTE: ``is_deleted = false`` 와 ``is_mmr_eligible = true`` 행만 읽는다.
 
-    식별자(``puuid`` 컬럼)는 db_test 전용으로 **player_code 기준으로 통합**한다.
-    같은 사람의 부캐(다른 puuid, 같은 player_code)를 하나로 합쳐 MMR을 계산하기
-    위함이다. participant.player_code 가 NULL 이면 riot_account 로 보강하고, 그래도
-    없으면 원본 puuid 를 쓴다. (운영 API 경로는 매핑하지 않고 백엔드가 보낸
-    식별자로 계산만 한다.)
+    MMR 식별자는 player_code이며 길드별로 계산한다. player_game의
+    player_code가 없으면 riot_account에서 보강한다. 원본 puuid는 계정
+    정보로만 전달하며 MMR 식별자 대신 사용하지 않는다.
     """
     engine = create_engine(get_db_url())
     player_game_table = get_player_game_table()
@@ -44,7 +42,8 @@ def load_match_dataframe_from_db(guild_id: str | None = None) -> pd.DataFrame:
         SELECT
             pg.id                                           AS player_game_id,
             pg.custom_match_id                              AS replay_code,
-            COALESCE(pg.player_code, ra.player_code, pg.puuid) AS puuid,
+            COALESCE(pg.player_code, ra.player_code)          AS player_code,
+            pg.puuid                                       AS puuid,
             pg.guild_id                                     AS guild_id,
             pg.champion_id                                 AS champion_id,
             pg.game_team                                   AS team,

@@ -49,7 +49,7 @@ def test_add_basic_features_creates_lane_gold_diff_against_opponent():
         {
             "replay_code": ["g1", "g1"],
             "position": ["TOP", "TOP"],
-            "puuid": ["winner", "loser"],
+            "player_code": ["winner", "loser"],
             "game_duration": [2.0, 2.0],
             "deaths": [1, 1],
             "kills": [1, 1],
@@ -63,8 +63,27 @@ def test_add_basic_features_creates_lane_gold_diff_against_opponent():
 
     out = add_basic_features(df)
 
-    assert out.loc[out["puuid"] == "winner", "lane_gold_diff"].item() == 300
-    assert out.loc[out["puuid"] == "loser", "lane_gold_diff"].item() == -300
+    assert out.loc[out["player_code"] == "winner", "lane_gold_diff"].item() == 300
+    assert out.loc[out["player_code"] == "loser", "lane_gold_diff"].item() == -300
+
+
+def test_lane_gold_diff_separates_guilds_with_same_replay_code():
+    df = pd.DataFrame({
+        "guild_id": ["guild-a", "guild-a", "guild-b", "guild-b"],
+        "replay_code": ["shared"] * 4,
+        "position": ["TOP"] * 4,
+        "player_code": ["a1", "a2", "b1", "b2"],
+        "game_duration": [2.0] * 4,
+        "deaths": [1] * 4,
+        "kills": [1] * 4,
+        "assists": [1] * 4,
+        "gold": [1200, 900, 500, 400],
+        "damage_to_champions": [100] * 4,
+        "damage_taken": [100] * 4,
+        "cc_time": [10] * 4,
+    })
+
+    assert add_basic_features(df)["lane_gold_diff"].tolist() == [300, -300, 100, -100]
 
 
 def test_add_basic_features_replaces_inf_when_duration_or_deaths_are_zero():

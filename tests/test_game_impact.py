@@ -112,17 +112,30 @@ def test_compute_vs_opponent_matches_same_game_and_position():
             "position": ["TOP", "TOP", "JUG", "JUG"],
             "game_result": [1, 0, 1, 0],
             "game_impact_winloss_norm": [70, 30, 40, 60],
-            "puuid": ["top_w", "top_l", "jg_w", "jg_l"],
+            "player_code": ["top_w", "top_l", "jg_w", "jg_l"],
         }
     )
 
     out = compute_vs_opponent(df)
 
-    scores = dict(zip(df["puuid"], out))
+    scores = dict(zip(df["player_code"], out))
     assert scores["top_w"] == 70
     assert scores["top_l"] == 30
     assert scores["jg_w"] == 40
     assert scores["jg_l"] == 60
+
+
+def test_opponent_comparison_separates_guilds_with_same_replay_code():
+    df = pd.DataFrame({
+        "guild_id": ["guild-a", "guild-a", "guild-b", "guild-b"],
+        "replay_code": ["shared"] * 4,
+        "position": ["TOP"] * 4,
+        "game_result": [1, 0, 1, 0],
+        "game_impact_winloss_norm": [80, 20, 30, 70],
+        "player_code": ["a-w", "a-l", "b-w", "b-l"],
+    })
+
+    assert compute_vs_opponent(df).tolist() == [80, 20, 30, 70]
 
 
 def test_compute_vs_opponent_preserves_original_index():
@@ -132,7 +145,7 @@ def test_compute_vs_opponent_preserves_original_index():
             "position": ["TOP", "TOP"],
             "game_result": [1, 0],
             "game_impact_winloss_norm": [65, 35],
-            "puuid": ["winner", "loser"],
+            "player_code": ["winner", "loser"],
         },
         index=[101, 205],
     )
@@ -170,7 +183,7 @@ def test_apply_game_impact_baseline_builds_incremental_features():
             "game_result": [1, 0],
             "kills": [10, 2],
             "assists": [0, 0],
-            "puuid": ["winner", "loser"],
+            "player_code": ["winner", "loser"],
         }
     )
     baseline = GameImpactBaseline(

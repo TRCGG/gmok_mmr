@@ -64,7 +64,7 @@ def add_basic_features(df: pd.DataFrame) -> pd.DataFrame:
     if "lane_gold_diff" not in out.columns and {
         "replay_code",
         "position",
-        "puuid",
+        "player_code",
         "gold",
     }.issubset(out.columns):
         out["lane_gold_diff"] = _compute_lane_gold_diff(out)
@@ -77,8 +77,9 @@ def add_basic_features(df: pd.DataFrame) -> pd.DataFrame:
 
 def _compute_lane_gold_diff(df: pd.DataFrame) -> pd.Series:
     """같은 경기, 같은 포지션 상대와의 gold 차이를 반환한다."""
-    opponent_gold_sum = df.groupby(["replay_code", "position"])["gold"].transform("sum") - df["gold"]
-    opponent_count = df.groupby(["replay_code", "position"])["gold"].transform("count") - 1
+    group_cols = ["guild_id", "replay_code", "position"] if "guild_id" in df.columns else ["replay_code", "position"]
+    opponent_gold_sum = df.groupby(group_cols)["gold"].transform("sum") - df["gold"]
+    opponent_count = df.groupby(group_cols)["gold"].transform("count") - 1
     opponent_gold = opponent_gold_sum / opponent_count.replace(0, np.nan)
     return df["gold"] - opponent_gold
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from mmr.silver import clean_match_data, find_rows_with_na
+from mmr.silver import clean_match_data, drop_invalid_matches, find_rows_with_na
 
 
 def test_clean_match_data_removes_duplicates_and_converts_basic_fields():
@@ -55,3 +55,22 @@ def test_find_rows_with_na_ignores_excluded_columns():
     out = find_rows_with_na(df, na_exclude_cols=("dragon_kills",))
 
     assert out["puuid"].tolist() == ["p2"]
+
+
+def test_invalid_match_in_one_guild_does_not_drop_same_replay_in_another():
+    rows = []
+    for guild_id in ("guild-a", "guild-b"):
+        for position in ("TOP", "JUG", "MID", "ADC", "SUP"):
+            for result in (1, 0):
+                rows.append({
+                    "guild_id": guild_id,
+                    "replay_code": "shared-replay",
+                    "position": position,
+                    "game_result": result,
+                })
+    df = pd.DataFrame(rows).iloc[:-1]
+
+    valid = drop_invalid_matches(df)
+
+    assert len(valid) == 10
+    assert valid["guild_id"].unique().tolist() == ["guild-a"]

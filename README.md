@@ -102,6 +102,13 @@ MMR_SUMMARY_TABLE=mmr_user_summary
 
 ## DB migration
 
+MMR 계산의 유저 식별자는 `player_code`입니다. 전적과 포지션별 MMR은
+`(guild_id, player_code)`별로 독립적으로 계산되며, 같은 사람이 다른 길드에서
+처음 경기하면 해당 길드의 초기 MMR에서 시작합니다. 원본 `puuid`는 Riot 계정
+식별용이며 MMR 그룹화에 사용하지 않습니다. DB 입력은 `player_game`과
+`riot_account`의 `player_code`를 사용하고, API 입력도 `guild_id`와
+`player_code`를 각 경기 행에 포함해야 합니다.
+
 결과 저장 테이블을 먼저 생성합니다.
 
 ```bash

@@ -15,7 +15,7 @@ def test_calculate_service_baseline_returns_serializable_payload():
             "position": ["TOP"] * 6,
             "game_result": [1, 0, 1, 0, 1, 0],
             "kills": [10, 2, 8, 3, 9, 1],
-            "puuid": ["p1", "p2", "p3", "p4", "p5", "p6"],
+            "player_code": ["p1", "p2", "p3", "p4", "p5", "p6"],
         }
     )
 

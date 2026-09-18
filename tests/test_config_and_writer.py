@@ -59,14 +59,14 @@ def test_writer_stamp_normalizes_columns_before_save():
         pd.DataFrame(
             {
                 "TOP_mmr": [1300.123],
-                "PUUID": ["p1"],
+                "PLAYER_CODE": ["p1"],
                 "player_game_id": [123],
             }
         )
     )
 
     assert "top_mmr" in out.columns
-    assert "puuid" in out.columns
+    assert "player_code" in out.columns
     assert "player_game_id" not in out.columns
     assert out["top_mmr"].item() == 1300.12
     assert "calculated_at" in out.columns

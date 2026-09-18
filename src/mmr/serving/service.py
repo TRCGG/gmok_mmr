@@ -47,7 +47,7 @@ def calculate_baseline_payload(payload: dict[str, Any]) -> dict[str, Any]:
     )
     return service_baseline_to_payload(
         baseline,
-        match_count=feature_df["replay_code"].nunique(),
+        match_count=feature_df[["guild_id", "replay_code"]].drop_duplicates().shape[0],
         player_game_row_count=len(feature_df),
     )
 
@@ -81,7 +81,7 @@ def calculate_full_mmr(payload: dict[str, Any]) -> dict[str, Any]:
         "match_results": _json_records(mmr_df_updated),
         "user_summary": _json_records(summary_df),
         "metadata": {
-            "match_count": int(feature_df["replay_code"].nunique()),
+            "match_count": int(feature_df[["guild_id", "replay_code"]].drop_duplicates().shape[0]),
             "player_game_row_count": int(len(feature_df)),
             "calculated_at": datetime.now(UTC).isoformat(),
         },
@@ -99,7 +99,9 @@ def calculate_single_match_mmr(payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(match_rows, list) or not match_rows:
         raise ValueError("Payload must include non-empty 'match_rows' list.")
 
-    state = _runtime_state_from_payload(payload.get("current_user_state", []))
+    state = _runtime_state_from_payload(
+        payload.get("current_user_state", []), guild_id=payload.get("guild_id")
+    )
     mmr_baseline = _baseline_from_payload(payload.get("baseline_stats"))
     game_impact_baseline = _game_impact_baseline_from_payload(
         payload.get("game_impact_baseline")
@@ -132,6 +134,12 @@ def calculate_single_match_mmr(payload: dict[str, Any]) -> dict[str, Any]:
 def build_base_feature_dataframe(raw_df: pd.DataFrame) -> pd.DataFrame:
     """API raw match row를 기본 feature DataFrame으로 변환한다."""
     raw_df = _normalize_source_columns(raw_df)
+    required = {"guild_id", "player_code"}
+    missing = required - set(raw_df.columns)
+    if missing:
+        raise ValueError(f"MMR source is missing required columns: {sorted(missing)}")
+    if raw_df[["guild_id", "player_code"]].isna().any().any():
+        raise ValueError("MMR source requires non-null guild_id and player_code.")
     clean_df = clean_match_data(raw_df, convert_duration_to_minutes=True)
     clean_df = drop_invalid_matches(clean_df)
     if clean_df.empty:
@@ -180,13 +188,17 @@ def _normalize_source_columns(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def _runtime_state_from_payload(rows: list[dict[str, Any]]) -> MMRRuntimeState:
+def _runtime_state_from_payload(
+    rows: list[dict[str, Any]], guild_id: str | None = None
+) -> MMRRuntimeState:
     state = MMRRuntimeState()
     for row in rows:
-        pid = row["puuid"]
+        player = (row.get("guild_id", guild_id), row["player_code"])
+        if player[0] is None:
+            raise ValueError("Current user state requires guild_id.")
         pos = row["position"]
-        state.player_pos_mmr.setdefault(pid, {})[pos] = int(row.get("pos_mmr", 1300))
-        state.player_pos_record.setdefault(pid, {})[pos] = {
+        state.player_pos_mmr.setdefault(player, {})[pos] = int(row.get("pos_mmr", 1300))
+        state.player_pos_record.setdefault(player, {})[pos] = {
             "win": int(row.get("pos_wins", 0)),
             "total": int(row.get("pos_games", 0)),
         }
@@ -220,17 +232,18 @@ def _game_impact_baseline_from_payload(
 
 def _state_summary_records(state: MMRRuntimeState) -> list[dict[str, Any]]:
     rows = []
-    for pid, pos_mmr in state.player_pos_mmr.items():
+    for (guild_id, player_code), pos_mmr in state.player_pos_mmr.items():
         rows.append(
             {
-                "puuid": pid,
-                "total_mmr": state.calculate_total_mmr(pid),
+                "guild_id": guild_id,
+                "player_code": player_code,
+                "total_mmr": state.calculate_total_mmr((guild_id, player_code)),
                 "positions": [
                     {
                         "position": pos,
                         "pos_mmr": mmr,
-                        "pos_games": state.player_pos_record[pid][pos]["total"],
-                        "pos_wins": state.player_pos_record[pid][pos]["win"],
+                        "pos_games": state.player_pos_record[(guild_id, player_code)][pos]["total"],
+                        "pos_wins": state.player_pos_record[(guild_id, player_code)][pos]["win"],
                     }
                     for pos, mmr in pos_mmr.items()
                 ],
