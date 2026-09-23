@@ -57,7 +57,8 @@ from harness.db_test.config import (
     get_mmr_summary_table,
 )
 from harness.db_test.baseline_repository import save_mmr_baseline_to_db_test
-from harness.db_test.repository import load_match_dataframe_from_db
+from harness.db_test.account_mapping import attach_mmr_player_account, reject_duplicate_mmr_accounts
+from harness.db_test.repository import load_guild_members_for_mmr, load_match_dataframe_from_db
 
 
 def main() -> None:
@@ -73,6 +74,16 @@ def main() -> None:
     if raw_df.empty:
         raise SystemExit("No eligible player-game rows were found for MMR_GUILD_ID.")
 
+    members = load_guild_members_for_mmr(guild_id=guild_id)
+    raw_df = attach_mmr_player_account(raw_df, members)
+    raw_df, rejected_matches = reject_duplicate_mmr_accounts(raw_df)
+    if raw_df.empty:
+        raise RuntimeError("No valid matches remain after MMR account conflict checks.")
+
+    _assert_result_tables_ready()
+    _assert_no_existing_matches(guild_id, raw_df)
+    _assert_baseline_table_ready()
+
     feature_df = build_base_feature_dataframe(raw_df)
     baseline = calculate_service_baseline(
         feature_df,
@@ -86,9 +97,6 @@ def main() -> None:
     )
     baseline_payload["metadata"]["guild_id"] = guild_id
 
-    _assert_result_tables_ready()
-    _assert_no_existing_matches(guild_id, raw_df)
-    _assert_baseline_table_ready()
     save_mmr_baseline_to_db_test(baseline_payload, is_active=True)
     print(
         "Saved baseline "
@@ -117,6 +125,7 @@ def main() -> None:
         guild_id=guild_id,
         match_results=match_results,
         user_summary=user_summary,
+        rejected_matches=rejected_matches,
     )
     print(
         "Calculated "
@@ -124,6 +133,8 @@ def main() -> None:
         f"{report['metadata']['player_game_row_count']:,} rows, "
         f"{report['metadata']['user_count']:,} users."
     )
+    if rejected_matches:
+        print(f"Rejected {len(rejected_matches):,} matches with duplicate MMR accounts.")
     save_mmr_results(match_results, user_summary, sink="db")
     report["saved_to_db"] = True
     output_path = _write_report(report, calculation_id)
@@ -155,7 +166,10 @@ def _prepare_user_summary(rows: list[dict[str, Any]], match_results):
     out = pd.DataFrame(rows)
     if out[["guild_id", "player_code"]].isna().any().any():
         raise RuntimeError("Calculated summaries require guild_id and player_code.")
-    valid_keys = match_results[["guild_id", "player_code"]].drop_duplicates()
+    key_column = "mmr_player_account" if "mmr_player_account" in match_results else "player_code"
+    valid_keys = match_results[["guild_id", key_column]].drop_duplicates().rename(
+        columns={key_column: "player_code"}
+    )
     checked = out.merge(
         valid_keys,
         on=["guild_id", "player_code"],
@@ -176,6 +190,7 @@ def _build_report(
     guild_id: str | None,
     match_results,
     user_summary,
+    rejected_matches: list[dict[str, Any]],
 ) -> dict[str, Any]:
     return {
         "calculation_id": calculation_id,
@@ -186,10 +201,12 @@ def _build_report(
             **result["metadata"],
             "user_count": int(user_summary["player_code"].nunique()),
             "summary_row_count": len(user_summary),
+            "rejected_match_count": len(rejected_matches),
         },
         "baseline_metadata": baseline_payload["metadata"],
         "match_results": match_results.to_dict(orient="records"),
         "user_summary": user_summary.to_dict(orient="records"),
+        "rejected_matches": rejected_matches,
     }
 
 
@@ -246,7 +263,7 @@ def _assert_baseline_table_ready() -> None:
 def _assert_result_tables_ready() -> None:
     engine = create_engine(get_db_url())
     required = {
-        get_mmr_match_result_table(): {"replay_code", "player_code", "guild_id"},
+        get_mmr_match_result_table(): {"replay_code", "player_code", "mmr_player_account", "guild_id"},
         get_mmr_summary_table(): {"player_code", "guild_id"},
     }
     with engine.connect() as conn:

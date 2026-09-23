@@ -11,6 +11,7 @@ from sqlalchemy import create_engine, inspect, text
 
 from .config import (
     get_db_url,
+    get_guild_member_table,
     get_mmr_match_result_table,
     get_mmr_summary_table,
     get_player_game_table,
@@ -125,6 +126,19 @@ def load_user_name_dataframe_from_db() -> pd.DataFrame:
 
     with engine.connect() as conn:
         return pd.read_sql(query, conn).drop_duplicates(subset=["puuid"])
+
+
+def load_guild_members_for_mmr(guild_id: str | None = None) -> pd.DataFrame:
+    """현재 활성 길드 멤버의 계정 귀속 관계를 일괄 조회한다."""
+    table_name = get_guild_member_table()
+    query = text(
+        f"SELECT guild_id, account, main_account, is_main FROM {table_name} "
+        "WHERE is_deleted = false"
+        + (" AND guild_id = :guild_id" if guild_id is not None else "")
+    )
+    engine = create_engine(get_db_url())
+    with engine.connect() as conn:
+        return pd.read_sql(query, conn, params={"guild_id": guild_id} if guild_id is not None else {})
 
 
 def save_mmr_results_to_db(
