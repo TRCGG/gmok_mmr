@@ -42,6 +42,11 @@ def get_player_table() -> str:
     return _safe_sql_identifier(os.environ.get("MMR_PLAYER_TABLE", "player"))
 
 
+def get_guild_member_table() -> str:
+    """본캐·부캐 관계를 읽을 길드 멤버 테이블명."""
+    return _safe_sql_identifier(os.environ.get("MMR_GUILD_MEMBER_TABLE", "guild_member"))
+
+
 def get_mmr_match_result_table() -> str:
     """row 단위 MMR 결과를 저장할 DB 테이블명을 반환한다."""
     return os.environ.get("MMR_MATCH_RESULT_TABLE", "mmr_match_results")

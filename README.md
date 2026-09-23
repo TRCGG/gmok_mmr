@@ -95,6 +95,7 @@ DB_PASSWORD=changeme
 
 MMR_PLAYER_GAME_TABLE=player_game
 MMR_PLAYER_TABLE=player
+MMR_GUILD_MEMBER_TABLE=guild_member
 
 MMR_MATCH_RESULT_TABLE=mmr_match_results
 MMR_SUMMARY_TABLE=mmr_user_summary
@@ -102,12 +103,20 @@ MMR_SUMMARY_TABLE=mmr_user_summary
 
 ## DB migration
 
-MMR 계산의 유저 식별자는 `player_code`입니다. 전적과 포지션별 MMR은
-`(guild_id, player_code)`별로 독립적으로 계산되며, 같은 사람이 다른 길드에서
-처음 경기하면 해당 길드의 초기 MMR에서 시작합니다. 원본 `puuid`는 Riot 계정
-식별용이며 MMR 그룹화에 사용하지 않습니다. DB 입력은 `player_game`과
-`riot_account`의 `player_code`를 사용하고, API 입력도 `guild_id`와
-`player_code`를 각 경기 행에 포함해야 합니다.
+MMR 계산의 유저 식별자는 `mmr_player_account`입니다. 전적과 포지션별 MMR은
+`(guild_id, mmr_player_account)`별로 독립적으로 계산되며, 같은 사람이 다른 길드에서
+처음 경기하면 해당 길드의 초기 MMR에서 시작합니다. `player_code`는 실제 경기
+계정이고 원본 `puuid`는 Riot 계정 식별용입니다. DB 입력은 `player_game`과
+`riot_account`의 `player_code`를 사용합니다. 기존 API 입력에 귀속 필드가 없으면
+MMR 계산은 `player_code`를 본인 귀속 계정으로 사용합니다.
+
+`scripts/run_mmr_once.py` DB 배치는 `guild_member`의 활성 관계를 조회합니다.
+부캐(`is_main=false`) 경기에는 `main_account`의 본캐 코드를
+`mmr_player_account`로 부여하여 본캐 전적으로 계산합니다. 경기 결과의
+`player_code`는 실제 참가 계정을 유지하고, 사용자 요약의 `player_code`는
+MMR 귀속 계정을 뜻합니다. 적용 전 `migrations/005_add_mmr_player_account.sql`을
+실행해야 합니다. 기존 경기 결과가 저장되어 있으면 배치는 중복 저장을 막기 위해
+중단하므로, 기존 결과의 재계산·교체 범위를 별도로 정해야 합니다.
 
 결과 저장 테이블을 먼저 생성합니다.
 

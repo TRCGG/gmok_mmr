@@ -223,6 +223,8 @@ def validate_mmr_input_matches(
     각 경기는 정확히 10개 row를 가져야 하며, 포지션별로 정확히 2개 row와
     승자 1명, 패자 1명을 가져야 한다.
     """
+    if "mmr_player_account" not in df.columns and "player_code" in df.columns:
+        df = df.assign(mmr_player_account=df["player_code"])
     missing_cols = [c for c in REQUIRED_MMR_COLUMNS if c not in df.columns]
     if missing_cols:
         raise ValueError(f"MMR input is missing required columns: {missing_cols}")
@@ -230,8 +232,11 @@ def validate_mmr_input_matches(
     if df.empty:
         raise ValueError("MMR input is empty.")
 
-    if df[["guild_id", "player_code", "replay_code"]].isna().any().any():
-        raise ValueError("MMR input requires non-null guild_id, player_code, and replay_code.")
+    identifiers = ["guild_id", "player_code", "mmr_player_account", "replay_code"]
+    if df[identifiers].isna().any().any() or df[["player_code", "mmr_player_account"]].apply(
+        lambda col: col.astype(str).str.strip().eq("")
+    ).any().any():
+        raise ValueError("MMR input requires non-empty guild_id, player_code, mmr_player_account, and replay_code.")
 
     game_counts = df.groupby(["guild_id", "replay_code"]).size()
     invalid_games = game_counts[game_counts != expected_players_per_game]
@@ -251,6 +256,11 @@ def validate_mmr_input_matches(
     if not duplicated_players.empty:
         sample = duplicated_players[["guild_id", "replay_code", "player_code"]].head().to_dict("records")
         raise ValueError(f"Invalid MMR input: duplicated player rows in a match. Invalid sample: {sample}")
+
+    duplicated_owners = df[df.duplicated(["guild_id", "replay_code", "mmr_player_account"], keep=False)]
+    if not duplicated_owners.empty:
+        sample = duplicated_owners[["guild_id", "replay_code", "player_code", "mmr_player_account"]].head().to_dict("records")
+        raise ValueError(f"Invalid MMR input: duplicated MMR accounts in a match. Invalid sample: {sample}")
 
     games = df[["guild_id", "replay_code"]].drop_duplicates()
     expected_index = pd.MultiIndex.from_tuples(
@@ -293,8 +303,10 @@ def make_summary_df_wide(
     mmr_df_updated: pd.DataFrame,
     positions: tuple[str, ...] = DEFAULT_POSITIONS,
 ) -> pd.DataFrame:
-    """길드와 player_code별 MMR 및 포지션 전적을 wide 형태로 정리한다."""
-    player_keys = ["guild_id", "player_code"]
+    """길드와 MMR 귀속 계정별 전적을 요약한다."""
+    if "mmr_player_account" not in mmr_df_updated.columns:
+        mmr_df_updated = mmr_df_updated.assign(mmr_player_account=mmr_df_updated["player_code"])
+    player_keys = ["guild_id", "mmr_player_account"]
     position_keys = [*player_keys, "position"]
     pos_last = (
         mmr_df_updated
@@ -370,7 +382,7 @@ def make_summary_df_wide(
         ordered_cols += [f"{pos}_mmr", f"{pos}_winrate", f"{pos}_games"]
 
     return (
-        summary_df[ordered_cols]
+        summary_df[ordered_cols].rename(columns={"mmr_player_account": "player_code"})
         .sort_values(by="total_mmr", ascending=False)
         .reset_index(drop=True)
     )
@@ -394,7 +406,7 @@ def _apply_mmr_game(
     # 경기 시작 전 MMR snapshot
     for _, row in game_df.iterrows():
         guild_id = row["guild_id"]
-        player_code = row["player_code"]
+        player_code = row["mmr_player_account"]
         pos = row["position"]
         pre_mmr[(guild_id, player_code, pos)] = state.get_pos_mmr(
             (guild_id, player_code), pos, settings=settings
@@ -403,17 +415,17 @@ def _apply_mmr_game(
     # 각 플레이어의 변동량 계산
     for _, row in game_df.iterrows():
         guild_id = row["guild_id"]
-        player_code = row["player_code"]
+        player_code = row["mmr_player_account"]
         pos = row["position"]
         current_mmr = pre_mmr[(guild_id, player_code, pos)]
 
         opponent_df = game_df[
-            (game_df["position"] == pos) & (game_df["player_code"] != player_code)
+            (game_df["position"] == pos) & (game_df["player_code"] != row["player_code"])
         ]
 
         opponent_mmr = settings.initial_mmr
         if not opponent_df.empty:
-            opp_code = opponent_df.iloc[0]["player_code"]
+            opp_code = opponent_df.iloc[0]["mmr_player_account"]
             opponent_mmr = pre_mmr.get((guild_id, opp_code, pos), settings.initial_mmr)
 
         expected = expected_performance(current_mmr, opponent_mmr)
@@ -475,6 +487,8 @@ def update_mmr_matches(
     validate: bool = True,
 ) -> pd.DataFrame:
     """여러 경기를 시간순으로 적용하고 row 단위 MMR 결과를 반환한다."""
+    if "mmr_player_account" not in df.columns:
+        df = df.assign(mmr_player_account=df["player_code"])
     if validate:
         validate_mmr_input_matches(df, positions=settings.positions)
 
@@ -503,6 +517,8 @@ def update_single_match_mmr(
     settings: MMRSettings = DEFAULT_MMR_SETTINGS,
 ) -> pd.DataFrame:
     """기존 상태에 단일 경기 하나를 적용하고 row 단위 MMR 결과를 반환한다."""
+    if "mmr_player_account" not in match_df.columns:
+        match_df = match_df.assign(mmr_player_account=match_df["player_code"])
     validate_mmr_input_matches(match_df, positions=settings.positions)
     games = match_df[["guild_id", "replay_code"]].drop_duplicates()
     if len(games) != 1:
