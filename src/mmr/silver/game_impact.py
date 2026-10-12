@@ -339,32 +339,18 @@ def compute_n_person_contribution(
     position_col: str = "position",
     players_per_game: int = 10,
 ) -> pd.Series:
-    """포지션 내 norm 합을 기준으로 본인 비중을 인분으로 환산한다.
+    """게임 전체 norm 합에서 본인이 차지한 비중을 인분으로 환산한다.
 
-    포지션마다 기여도 합계가 동일해지도록 균형화하여, 특정 position의 비중이
-    과도하게 커지거나 작아지지 않도록 한다. position 정보가 없으면 게임 전체
-    합을 기준으로 기존 방식(본인 비중 × 10)을 사용한다.
-    5개 포지션이면 포지션당 목표 비중은 2, 한 게임 전체 합은 10이 된다.
+    ``game_impact_winloss_norm``은 앞 단계에서 position × win/loss 기준으로
+    정규화되어 있으므로 여기서는 포지션별 몫을 다시 고정하지 않는다. 같은
+    경기의 모든 선수가 기여도를 두고 비교하며, 정상적인 10인 경기의 인분
+    합계는 10이 된다. ``position_col``은 기존 호출부 호환을 위해 유지한다.
     """
+    del position_col
     game_cols = ["guild_id", game_id_col] if "guild_id" in df.columns else [game_id_col]
-    if position_col not in df.columns:
-        game_wide_sum = df.groupby(game_cols)[norm_col].transform("sum")
-        return (df[norm_col] / game_wide_sum * players_per_game).fillna(0)
-
-    group_cols = [*game_cols, position_col]
-    position_sum = df.groupby(group_cols)[norm_col].transform("sum")
-    positions_per_game = df.groupby(game_cols)[position_col].transform("nunique")
-    position_target = players_per_game / positions_per_game.replace(0, np.nan)
-
-    contribution = df[norm_col] / position_sum * position_target
-
-    zero_or_missing_sum = position_sum.isna() | np.isclose(position_sum, 0)
-    if zero_or_missing_sum.any():
-        players_per_position = df.groupby(group_cols)[norm_col].transform("size")
-        fallback = position_target / players_per_position.replace(0, np.nan)
-        contribution = contribution.mask(zero_or_missing_sum, fallback)
-
-    return contribution.fillna(0)
+    game_wide_sum = df.groupby(game_cols)[norm_col].transform("sum")
+    valid_sum = game_wide_sum.where(~np.isclose(game_wide_sum, 0))
+    return (df[norm_col] / valid_sum * players_per_game).fillna(0)
 
 
 def compute_vs_opponent(
