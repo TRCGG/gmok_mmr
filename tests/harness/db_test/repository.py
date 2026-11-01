@@ -7,12 +7,15 @@ SQL 문과 DB read/write 책임을 관리한다.
 from __future__ import annotations
 
 import pandas as pd
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import MetaData, Table, create_engine, inspect, text
+from sqlalchemy.dialects.postgresql import insert
 
 from .config import (
     get_db_url,
     get_guild_member_table,
     get_mmr_match_result_table,
+    get_mmr_history_table,
+    get_mmr_position_summary_table,
     get_mmr_summary_table,
     get_player_game_table,
     get_player_table,
@@ -132,7 +135,7 @@ def load_guild_members_for_mmr(guild_id: str | None = None) -> pd.DataFrame:
     """현재 활성 길드 멤버의 계정 귀속 관계를 일괄 조회한다."""
     table_name = get_guild_member_table()
     query = text(
-        f"SELECT guild_id, account, main_account, is_main FROM {table_name} "
+        f"SELECT guild_id, account, main_account, is_main, status FROM {table_name} "
         "WHERE is_deleted = false"
         + (" AND guild_id = :guild_id" if guild_id is not None else "")
     )
@@ -144,6 +147,8 @@ def load_guild_members_for_mmr(guild_id: str | None = None) -> pd.DataFrame:
 def save_mmr_results_to_db(
     match_results: pd.DataFrame,
     user_summary: pd.DataFrame,
+    mmr_history: pd.DataFrame | None = None,
+    position_summary: pd.DataFrame | None = None,
 ) -> None:
     """계산된 MMR 결과를 PostgreSQL 결과 테이블에 추가 저장한다."""
     engine = create_engine(get_db_url())
@@ -164,6 +169,20 @@ def save_mmr_results_to_db(
             method="multi",
             chunksize=1000,
         )
+        if mmr_history is not None:
+            _upsert_dataframe(
+                mmr_history,
+                conn,
+                get_mmr_history_table(),
+                ["guild_id", "player_code", "position", "replay_code"],
+            )
+        if position_summary is not None:
+            _upsert_dataframe(
+                position_summary,
+                conn,
+                get_mmr_position_summary_table(),
+                ["guild_id", "player_code", "position"],
+            )
 
 
 def _align_to_table_columns(
@@ -175,3 +194,20 @@ def _align_to_table_columns(
     table_cols = {col["name"] for col in inspect(conn).get_columns(table_name)}
     keep_cols = [col for col in df.columns if col in table_cols]
     return df[keep_cols]
+
+
+def _upsert_dataframe(df: pd.DataFrame, conn, table_name: str, keys: list[str]) -> None:
+    """DataFrame을 PostgreSQL 고유 키 기준으로 업서트한다."""
+    aligned = _align_to_table_columns(df, conn, table_name)
+    if aligned.empty:
+        return
+    table = Table(table_name, MetaData(), autoload_with=conn)
+    records = aligned.where(pd.notna(aligned), None).to_dict(orient="records")
+    for start in range(0, len(records), 1000):
+        statement = insert(table).values(records[start : start + 1000])
+        update_columns = {
+            column.name: statement.excluded[column.name]
+            for column in table.columns
+            if column.name not in {"id", *keys}
+        }
+        conn.execute(statement.on_conflict_do_update(index_elements=keys, set_=update_columns))

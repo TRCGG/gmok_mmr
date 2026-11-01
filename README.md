@@ -99,6 +99,8 @@ MMR_GUILD_MEMBER_TABLE=guild_member
 
 MMR_MATCH_RESULT_TABLE=mmr_match_results
 MMR_SUMMARY_TABLE=mmr_user_summary
+MMR_HISTORY_TABLE=mmr_history
+MMR_POSITION_SUMMARY_TABLE=mmr_user_position_summary
 ```
 
 ## DB migration
@@ -149,6 +151,14 @@ python tests/cli/calculate_full_mmr_with_db_baseline.py --season 2026-S1 --basel
 결과 테이블까지 저장하려면 전체 MMR 계산 명령에 `--save-results`를 추가합니다.
 
 기본값은 `.env`의 `MMR_DATA_SOURCE`, `MMR_RESULT_SINK`를 따릅니다.
+
+프론트 조회용 MMR 이력과 포지션별 지표·스타일까지 함께 저장하려면 다음 명령을
+실행합니다. 이 명령은 `006_create_mmr_report_tables.sql`을 적용한 뒤 전체 MMR 배치를
+연속 실행합니다.
+
+```bash
+python scripts/run_mmr_report_once.py
+```
 
 ## 테스트
 

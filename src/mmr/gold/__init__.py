@@ -35,3 +35,6 @@ __all__ = [
     "update_single_match_mmr",
     "validate_mmr_input_matches",
 ]
+from .report import build_mmr_history, build_user_position_report, filter_active_guild_members
+
+__all__ = ["build_mmr_history", "build_user_position_report", "filter_active_guild_members"]

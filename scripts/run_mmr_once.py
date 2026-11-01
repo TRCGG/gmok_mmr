@@ -47,6 +47,11 @@ except ImportError as exc:  # pragma: no cover - dependency is in requirements.t
 load_dotenv(ROOT / ".env")
 
 from mmr.gold.baseline import calculate_service_baseline, service_baseline_to_payload
+from mmr.gold.report import (
+    build_mmr_history,
+    build_user_position_report,
+    filter_active_guild_members,
+)
 from mmr.serving.service import calculate_full_mmr, build_base_feature_dataframe
 from harness.config import get_output_dir
 from harness.data_writer import save_mmr_results
@@ -54,6 +59,8 @@ from harness.db_test.config import (
     get_db_url,
     get_mmr_baseline_table,
     get_mmr_match_result_table,
+    get_mmr_history_table,
+    get_mmr_position_summary_table,
     get_mmr_summary_table,
 )
 from harness.db_test.baseline_repository import save_mmr_baseline_to_db_test
@@ -118,6 +125,10 @@ def main() -> None:
 
     match_results = _prepare_match_results(result["match_results"], guild_id)
     user_summary = _prepare_user_summary(result["user_summary"], match_results)
+    mmr_history = build_mmr_history(match_results)
+    position_summary = filter_active_guild_members(
+        build_user_position_report(match_results), members
+    )
     report = _build_report(
         result=result,
         baseline_payload=baseline_payload,
@@ -125,6 +136,8 @@ def main() -> None:
         guild_id=guild_id,
         match_results=match_results,
         user_summary=user_summary,
+        mmr_history=mmr_history,
+        position_summary=position_summary,
         rejected_matches=rejected_matches,
     )
     print(
@@ -135,7 +148,13 @@ def main() -> None:
     )
     if rejected_matches:
         print(f"Rejected {len(rejected_matches):,} matches with duplicate MMR accounts.")
-    save_mmr_results(match_results, user_summary, sink="db")
+    save_mmr_results(
+        match_results,
+        user_summary,
+        sink="db",
+        mmr_history=mmr_history,
+        position_summary=position_summary,
+    )
     report["saved_to_db"] = True
     output_path = _write_report(report, calculation_id)
     print(f"Report: {output_path}")
@@ -190,6 +209,8 @@ def _build_report(
     guild_id: str | None,
     match_results,
     user_summary,
+    mmr_history,
+    position_summary,
     rejected_matches: list[dict[str, Any]],
 ) -> dict[str, Any]:
     return {
@@ -206,6 +227,8 @@ def _build_report(
         "baseline_metadata": baseline_payload["metadata"],
         "match_results": match_results.to_dict(orient="records"),
         "user_summary": user_summary.to_dict(orient="records"),
+        "mmr_history": mmr_history.to_dict(orient="records"),
+        "position_summary": position_summary.to_dict(orient="records"),
         "rejected_matches": rejected_matches,
     }
 
@@ -265,6 +288,12 @@ def _assert_result_tables_ready() -> None:
     required = {
         get_mmr_match_result_table(): {"replay_code", "player_code", "mmr_player_account", "guild_id"},
         get_mmr_summary_table(): {"player_code", "guild_id"},
+        get_mmr_history_table(): {
+            "guild_id", "player_code", "position", "replay_code", "played_at", "mmr", "mmr_change"
+        },
+        get_mmr_position_summary_table(): {
+            "guild_id", "player_code", "position", "mmr", "games", "base_style", "position_style"
+        },
     }
     with engine.connect() as conn:
         inspector = inspect(conn)
