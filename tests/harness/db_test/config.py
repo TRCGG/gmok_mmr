@@ -57,18 +57,6 @@ def get_mmr_summary_table() -> str:
     return os.environ.get("MMR_SUMMARY_TABLE", "mmr_user_summary")
 
 
-def get_mmr_history_table() -> str:
-    """경기별 MMR 이력 테이블명을 반환한다."""
-    return _safe_sql_identifier(os.environ.get("MMR_HISTORY_TABLE", "mmr_history"))
-
-
-def get_mmr_position_summary_table() -> str:
-    """프론트 조회용 유저·포지션 요약 테이블명을 반환한다."""
-    return _safe_sql_identifier(
-        os.environ.get("MMR_POSITION_SUMMARY_TABLE", "mmr_user_position_summary")
-    )
-
-
 def get_mmr_baseline_table() -> str:
     """DB 테스트용 baseline 테이블명을 반환한다."""
     return _safe_sql_identifier(os.environ.get("MMR_BASELINE_TABLE", "mmr_baselines"))

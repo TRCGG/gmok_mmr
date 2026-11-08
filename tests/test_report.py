@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 import pandas as pd
 
 from mmr.gold.report import (
-    build_mmr_history,
+    attach_position_report,
     build_user_position_report,
     filter_active_guild_members,
 )
@@ -46,13 +46,6 @@ def _report_rows(user_count: int = 5, games: int = 20) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def test_history_uses_main_account_and_keeps_game_mmr():
-    history = build_mmr_history(_report_rows(user_count=1, games=2))
-
-    assert history["player_code"].tolist() == ["main-0", "main-0"]
-    assert history["mmr"].tolist() == [1300, 1301]
-
-
 def test_position_report_classifies_with_five_eligible_users():
     report = build_user_position_report(_report_rows())
     strongest = report.loc[report["player_code"].eq("main-4")].iloc[0]
@@ -71,15 +64,14 @@ def test_position_report_holds_style_when_reference_group_is_too_small():
     assert set(report["reference_users"]) == {4}
 
 
-def test_report_migration_contains_required_unique_keys():
+def test_report_migration_extends_existing_summary_with_json():
     sql = open(
         "migrations/006_create_mmr_report_tables.sql", encoding="utf-8"
     ).read()
 
-    assert "CREATE TABLE IF NOT EXISTS mmr_history" in sql
-    assert "UNIQUE (guild_id, player_code, position, replay_code)" in sql
-    assert "CREATE TABLE IF NOT EXISTS mmr_user_position_summary" in sql
-    assert "UNIQUE (guild_id, player_code, position)" in sql
+    assert "ALTER TABLE mmr_user_summary" in sql
+    assert "position_report JSONB" in sql
+    assert "CREATE TABLE" not in sql
 
 
 def test_active_member_filter_merges_alt_account_and_excludes_departed_member():
@@ -104,3 +96,26 @@ def test_active_member_filter_merges_alt_account_and_excludes_departed_member():
     active = filter_active_guild_members(report, members)
 
     assert active["player_code"].tolist() == ["main-0"]
+
+
+def test_position_report_is_attached_as_json_and_excludes_departed_user():
+    report = build_user_position_report(_report_rows(user_count=2))
+    members = pd.DataFrame(
+        [
+            {"guild_id": "guild-1", "account": "main-0", "main_account": None, "status": "1"},
+            {"guild_id": "guild-1", "account": "main-1", "main_account": None, "status": "2"},
+        ]
+    )
+    active = filter_active_guild_members(report, members)
+    summary = pd.DataFrame(
+        [
+            {"guild_id": "guild-1", "player_code": "main-0", "total_mmr": 1300},
+            {"guild_id": "guild-1", "player_code": "main-1", "total_mmr": 1400},
+        ]
+    )
+
+    enriched = attach_position_report(summary, active)
+
+    assert enriched["player_code"].tolist() == ["main-0"]
+    assert enriched.iloc[0]["position_report"]["TOP"]["games"] == 20
+    assert enriched.iloc[0]["position_report"]["TOP"]["base_style"] == "분류 준비 상태"

@@ -7,15 +7,12 @@ SQL 문과 DB read/write 책임을 관리한다.
 from __future__ import annotations
 
 import pandas as pd
-from sqlalchemy import MetaData, Table, create_engine, inspect, text
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import create_engine, inspect, text
 
 from .config import (
     get_db_url,
     get_guild_member_table,
     get_mmr_match_result_table,
-    get_mmr_history_table,
-    get_mmr_position_summary_table,
     get_mmr_summary_table,
     get_player_game_table,
     get_player_table,
@@ -147,13 +144,15 @@ def load_guild_members_for_mmr(guild_id: str | None = None) -> pd.DataFrame:
 def save_mmr_results_to_db(
     match_results: pd.DataFrame,
     user_summary: pd.DataFrame,
-    mmr_history: pd.DataFrame | None = None,
-    position_summary: pd.DataFrame | None = None,
 ) -> None:
-    """계산된 MMR 결과를 PostgreSQL 결과 테이블에 추가 저장한다."""
+    """계산된 MMR 결과를 PostgreSQL 결과 테이블에 교체 저장한다."""
     engine = create_engine(get_db_url())
     with engine.begin() as conn:
-        _align_to_table_columns(match_results, conn, get_mmr_match_result_table()).to_sql(
+        matches = _align_to_table_columns(
+            match_results, conn, get_mmr_match_result_table()
+        )
+        _delete_existing_match_rows(matches, conn, get_mmr_match_result_table())
+        matches.to_sql(
             get_mmr_match_result_table(),
             conn,
             if_exists="append",
@@ -161,7 +160,9 @@ def save_mmr_results_to_db(
             method="multi",
             chunksize=1000,
         )
-        _align_to_table_columns(user_summary, conn, get_mmr_summary_table()).to_sql(
+        summary = _align_to_table_columns(user_summary, conn, get_mmr_summary_table())
+        _delete_existing_summary_scope(matches, conn, get_mmr_summary_table())
+        summary.to_sql(
             get_mmr_summary_table(),
             conn,
             if_exists="append",
@@ -169,20 +170,6 @@ def save_mmr_results_to_db(
             method="multi",
             chunksize=1000,
         )
-        if mmr_history is not None:
-            _upsert_dataframe(
-                mmr_history,
-                conn,
-                get_mmr_history_table(),
-                ["guild_id", "player_code", "position", "replay_code"],
-            )
-        if position_summary is not None:
-            _upsert_dataframe(
-                position_summary,
-                conn,
-                get_mmr_position_summary_table(),
-                ["guild_id", "player_code", "position"],
-            )
 
 
 def _align_to_table_columns(
@@ -196,18 +183,23 @@ def _align_to_table_columns(
     return df[keep_cols]
 
 
-def _upsert_dataframe(df: pd.DataFrame, conn, table_name: str, keys: list[str]) -> None:
-    """DataFrame을 PostgreSQL 고유 키 기준으로 업서트한다."""
-    aligned = _align_to_table_columns(df, conn, table_name)
-    if aligned.empty:
+def _delete_existing_match_rows(df: pd.DataFrame, conn, table_name: str) -> None:
+    """재계산 범위의 기존 경기 결과를 새 결과 저장 전에 제거한다."""
+    if df.empty:
         return
-    table = Table(table_name, MetaData(), autoload_with=conn)
-    records = aligned.where(pd.notna(aligned), None).to_dict(orient="records")
-    for start in range(0, len(records), 1000):
-        statement = insert(table).values(records[start : start + 1000])
-        update_columns = {
-            column.name: statement.excluded[column.name]
-            for column in table.columns
-            if column.name not in {"id", *keys}
-        }
-        conn.execute(statement.on_conflict_do_update(index_elements=keys, set_=update_columns))
+    keys = df[["guild_id", "replay_code"]].drop_duplicates().to_dict(orient="records")
+    conn.execute(
+        text(
+            f"DELETE FROM {table_name} "
+            "WHERE guild_id = :guild_id AND replay_code = :replay_code"
+        ),
+        keys,
+    )
+
+
+def _delete_existing_summary_scope(df: pd.DataFrame, conn, table_name: str) -> None:
+    """계산 대상 길드의 이전 요약을 제거해 탈퇴 유저 행도 함께 정리한다."""
+    if df.empty:
+        return
+    guilds = df[["guild_id"]].drop_duplicates().to_dict(orient="records")
+    conn.execute(text(f"DELETE FROM {table_name} WHERE guild_id = :guild_id"), guilds)

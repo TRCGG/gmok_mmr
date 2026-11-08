@@ -23,22 +23,14 @@ def save_mmr_results(
     match_results: pd.DataFrame,
     user_summary: pd.DataFrame,
     sink: str | None = None,
-    *,
-    mmr_history: pd.DataFrame | None = None,
-    position_summary: pd.DataFrame | None = None,
 ) -> None:
     """row 단위 결과와 요약 결과를 설정된 저장 방식으로 저장한다."""
     sink = (sink or get_result_sink()).lower()
     if sink == "db":
-        _save_results_to_db(match_results, user_summary, mmr_history, position_summary)
+        _save_results_to_db(match_results, user_summary)
         return
     if sink == "api":
-        _save_results_to_api(
-            match_results,
-            user_summary,
-            mmr_history,
-            position_summary,
-        )
+        _save_results_to_api(match_results, user_summary)
         return
     raise ValueError(f"Unsupported MMR_RESULT_SINK: {sink!r}")
 
@@ -56,15 +48,11 @@ def _stamp(df: pd.DataFrame) -> pd.DataFrame:
 def _save_results_to_db(
     match_results: pd.DataFrame,
     user_summary: pd.DataFrame,
-    mmr_history: pd.DataFrame | None,
-    position_summary: pd.DataFrame | None,
 ) -> None:
-    """계산된 MMR 결과를 PostgreSQL 테이블에 추가 저장한다."""
+    """계산된 MMR 결과를 PostgreSQL 테이블에 교체 저장한다."""
     save_mmr_results_to_db(
         _stamp(match_results),
         _stamp(user_summary),
-        None if mmr_history is None else _stamp(mmr_history),
-        None if position_summary is None else _stamp(position_summary),
     )
 
 
@@ -79,8 +67,6 @@ def _api_headers() -> dict[str, str]:
 def _save_results_to_api(
     match_results: pd.DataFrame,
     user_summary: pd.DataFrame,
-    mmr_history: pd.DataFrame | None = None,
-    position_summary: pd.DataFrame | None = None,
 ) -> None:
     """계산된 MMR 결과를 백엔드 API로 전송한다."""
     import requests
@@ -89,10 +75,6 @@ def _save_results_to_api(
         "match_results": _stamp(match_results).to_dict(orient="records"),
         "user_summary": _stamp(user_summary).to_dict(orient="records"),
     }
-    if mmr_history is not None:
-        payload["mmr_history"] = _stamp(mmr_history).to_dict(orient="records")
-    if position_summary is not None:
-        payload["position_summary"] = _stamp(position_summary).to_dict(orient="records")
     resp = requests.post(
         f"{get_api_base_url()}/v1/mmr/results",
         headers=_api_headers(),

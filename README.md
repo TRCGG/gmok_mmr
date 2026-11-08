@@ -99,8 +99,6 @@ MMR_GUILD_MEMBER_TABLE=guild_member
 
 MMR_MATCH_RESULT_TABLE=mmr_match_results
 MMR_SUMMARY_TABLE=mmr_user_summary
-MMR_HISTORY_TABLE=mmr_history
-MMR_POSITION_SUMMARY_TABLE=mmr_user_position_summary
 ```
 
 ## DB migration
@@ -117,8 +115,8 @@ MMR 계산은 `player_code`를 본인 귀속 계정으로 사용합니다.
 `mmr_player_account`로 부여하여 본캐 전적으로 계산합니다. 경기 결과의
 `player_code`는 실제 참가 계정을 유지하고, 사용자 요약의 `player_code`는
 MMR 귀속 계정을 뜻합니다. 적용 전 `migrations/005_add_mmr_player_account.sql`을
-실행해야 합니다. 기존 경기 결과가 저장되어 있으면 배치는 중복 저장을 막기 위해
-중단하므로, 기존 결과의 재계산·교체 범위를 별도로 정해야 합니다.
+실행해야 합니다. 배치를 재실행하면 계산 대상 경기 결과와 해당 길드의 최신 사용자
+요약을 한 트랜잭션에서 교체합니다.
 
 결과 저장 테이블을 먼저 생성합니다.
 
@@ -152,9 +150,9 @@ python tests/cli/calculate_full_mmr_with_db_baseline.py --season 2026-S1 --basel
 
 기본값은 `.env`의 `MMR_DATA_SOURCE`, `MMR_RESULT_SINK`를 따릅니다.
 
-프론트 조회용 MMR 이력과 포지션별 지표·스타일까지 함께 저장하려면 다음 명령을
-실행합니다. 이 명령은 `006_create_mmr_report_tables.sql`을 적용한 뒤 전체 MMR 배치를
-연속 실행합니다.
+프론트 조회용 포지션별 지표·스타일을 기존 유저 요약 JSON에 함께 저장하려면 다음
+명령을 실행합니다. 경기별 MMR 이력은 기존 경기 결과를 사용합니다. 이 명령은
+`006_create_mmr_report_tables.sql`을 적용한 뒤 전체 MMR 배치를 연속 실행합니다.
 
 ```bash
 python scripts/run_mmr_report_once.py

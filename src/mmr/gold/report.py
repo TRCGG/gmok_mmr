@@ -1,4 +1,4 @@
-"""프론트 조회용 MMR 이력과 포지션 리포트 집계."""
+"""프론트 조회용 포지션 리포트 집계."""
 
 from __future__ import annotations
 
@@ -52,23 +52,6 @@ POSITION_STYLE_RULES: dict[str, tuple[StyleRule, ...]] = {
         ("교전 개시형 서포터", lambda p: p["game_n_person_contribution"] >= 70 and p["dpm"] >= 55 and p["kda"] >= 55),
     ),
 }
-
-
-def build_mmr_history(match_results: pd.DataFrame) -> pd.DataFrame:
-    """경기 종료 시점의 본캐 귀속 포지션 MMR 이력을 만든다."""
-    _require_columns(match_results, {
-        "guild_id", "position", "replay_code", "played_at",
-        "mmr_change", "pos_cumulative_mmr",
-    })
-    history = match_results.assign(player_code=_account_series(match_results))[
-        ["guild_id", "player_code", "position", "replay_code", "played_at",
-         "pos_cumulative_mmr", "mmr_change"]
-    ].rename(columns={"pos_cumulative_mmr": "mmr"})
-    return (
-        history.sort_values(["played_at", "replay_code"])
-        .drop_duplicates(["guild_id", "player_code", "position", "replay_code"], keep="last")
-        .reset_index(drop=True)
-    )
 
 
 def build_user_position_report(
@@ -162,6 +145,42 @@ def filter_active_guild_members(
     )
 
 
+def attach_position_report(
+    user_summary: pd.DataFrame, position_summary: pd.DataFrame
+) -> pd.DataFrame:
+    """활성 유저 요약에 포지션별 리포트를 JSON 호환 객체로 합친다.
+
+    ``position_summary``는 활성 길드원 필터가 적용된 결과여야 한다. 따라서
+    inner join을 사용해 탈퇴 유저를 최종 요약 저장 대상에서도 제외한다.
+    """
+    keys = ["guild_id", "player_code"]
+    _require_columns(user_summary, set(keys))
+    _require_columns(position_summary, {*keys, "position"})
+
+    payload_columns = [column for column in position_summary.columns if column not in keys]
+    reports = []
+    for key_values, group in position_summary.groupby(keys, sort=False):
+        position_report = {}
+        for row in group[payload_columns].to_dict(orient="records"):
+            position = str(row.pop("position"))
+            position_report[position] = {
+                key: _json_value(value) for key, value in row.items()
+            }
+        reports.append({
+            "guild_id": key_values[0],
+            "player_code": key_values[1],
+            "position_report": position_report,
+        })
+
+    report_frame = pd.DataFrame(reports, columns=[*keys, "position_report"])
+    return user_summary.merge(
+        report_frame,
+        on=keys,
+        how="inner",
+        validate="one_to_one",
+    )
+
+
 def _account_series(frame: pd.DataFrame) -> pd.Series:
     column = "mmr_player_account" if "mmr_player_account" in frame else "player_code"
     if column not in frame:
@@ -183,6 +202,14 @@ def _classify(percentiles: dict[str, float], rules: tuple[StyleRule, ...], defau
         if rule(percentiles):
             return label
     return default
+
+
+def _json_value(value: object) -> object:
+    if pd.isna(value):
+        return None
+    if hasattr(value, "item"):
+        return value.item()
+    return value
 
 
 def _require_columns(frame: pd.DataFrame, required: set[str]) -> None:

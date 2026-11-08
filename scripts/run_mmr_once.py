@@ -32,7 +32,7 @@ import re
 import sys
 from typing import Any
 
-from sqlalchemy import bindparam, create_engine, inspect, text
+from sqlalchemy import create_engine, inspect
 
 ROOT = Path(__file__).resolve().parents[1]
 for _path in (ROOT / "src", ROOT / "tests"):
@@ -48,7 +48,7 @@ load_dotenv(ROOT / ".env")
 
 from mmr.gold.baseline import calculate_service_baseline, service_baseline_to_payload
 from mmr.gold.report import (
-    build_mmr_history,
+    attach_position_report,
     build_user_position_report,
     filter_active_guild_members,
 )
@@ -59,8 +59,6 @@ from harness.db_test.config import (
     get_db_url,
     get_mmr_baseline_table,
     get_mmr_match_result_table,
-    get_mmr_history_table,
-    get_mmr_position_summary_table,
     get_mmr_summary_table,
 )
 from harness.db_test.baseline_repository import save_mmr_baseline_to_db_test
@@ -88,7 +86,6 @@ def main() -> None:
         raise RuntimeError("No valid matches remain after MMR account conflict checks.")
 
     _assert_result_tables_ready()
-    _assert_no_existing_matches(guild_id, raw_df)
     _assert_baseline_table_ready()
 
     feature_df = build_base_feature_dataframe(raw_df)
@@ -125,10 +122,10 @@ def main() -> None:
 
     match_results = _prepare_match_results(result["match_results"], guild_id)
     user_summary = _prepare_user_summary(result["user_summary"], match_results)
-    mmr_history = build_mmr_history(match_results)
     position_summary = filter_active_guild_members(
         build_user_position_report(match_results), members
     )
+    user_summary = attach_position_report(user_summary, position_summary)
     report = _build_report(
         result=result,
         baseline_payload=baseline_payload,
@@ -136,7 +133,6 @@ def main() -> None:
         guild_id=guild_id,
         match_results=match_results,
         user_summary=user_summary,
-        mmr_history=mmr_history,
         position_summary=position_summary,
         rejected_matches=rejected_matches,
     )
@@ -148,13 +144,7 @@ def main() -> None:
     )
     if rejected_matches:
         print(f"Rejected {len(rejected_matches):,} matches with duplicate MMR accounts.")
-    save_mmr_results(
-        match_results,
-        user_summary,
-        sink="db",
-        mmr_history=mmr_history,
-        position_summary=position_summary,
-    )
+    save_mmr_results(match_results, user_summary, sink="db")
     report["saved_to_db"] = True
     output_path = _write_report(report, calculation_id)
     print(f"Report: {output_path}")
@@ -209,7 +199,6 @@ def _build_report(
     guild_id: str | None,
     match_results,
     user_summary,
-    mmr_history,
     position_summary,
     rejected_matches: list[dict[str, Any]],
 ) -> dict[str, Any]:
@@ -227,7 +216,6 @@ def _build_report(
         "baseline_metadata": baseline_payload["metadata"],
         "match_results": match_results.to_dict(orient="records"),
         "user_summary": user_summary.to_dict(orient="records"),
-        "mmr_history": mmr_history.to_dict(orient="records"),
         "position_summary": position_summary.to_dict(orient="records"),
         "rejected_matches": rejected_matches,
     }
@@ -287,13 +275,7 @@ def _assert_result_tables_ready() -> None:
     engine = create_engine(get_db_url())
     required = {
         get_mmr_match_result_table(): {"replay_code", "player_code", "mmr_player_account", "guild_id"},
-        get_mmr_summary_table(): {"player_code", "guild_id"},
-        get_mmr_history_table(): {
-            "guild_id", "player_code", "position", "replay_code", "played_at", "mmr", "mmr_change"
-        },
-        get_mmr_position_summary_table(): {
-            "guild_id", "player_code", "position", "mmr", "games", "base_style", "position_style"
-        },
+        get_mmr_summary_table(): {"player_code", "guild_id", "position_report"},
     }
     with engine.connect() as conn:
         inspector = inspect(conn)
@@ -308,78 +290,6 @@ def _assert_result_tables_ready() -> None:
                     f"Result table {table_name} is missing columns: {missing}. "
                     "Apply the result-table migrations first."
                 )
-
-
-def _assert_no_existing_matches(guild_id: str | None, match_results) -> None:
-    table_name = get_mmr_match_result_table()
-    _validate_identifier(table_name)
-    replay_codes = sorted(set(match_results["replay_code"].dropna().astype(str)))
-    if not replay_codes:
-        raise RuntimeError("Calculated results contain no replay_code values.")
-
-    if guild_id is not None:
-        query = text(
-            f"""
-            SELECT guild_id, replay_code
-            FROM {table_name}
-            WHERE guild_id = :guild_id
-              AND replay_code IN :replay_codes
-            """
-        ).bindparams(bindparam("replay_codes", expanding=True))
-        params = {"guild_id": guild_id, "replay_codes": replay_codes}
-    else:
-        query = text(
-            f"""
-            SELECT guild_id, replay_code
-            FROM {table_name}
-            WHERE replay_code IN :replay_codes
-            """
-        ).bindparams(bindparam("replay_codes", expanding=True))
-        params = {"replay_codes": replay_codes}
-
-    guild_values = (
-        match_results["guild_id"]
-        if "guild_id" in match_results.columns
-        else [None] * len(match_results)
-    )
-    expected_pairs = {
-        (
-            None if _is_missing(guild) else str(guild),
-            str(replay_code),
-        )
-        for guild, replay_code in zip(
-            guild_values,
-            match_results["replay_code"],
-        )
-    }
-
-    engine = create_engine(get_db_url())
-    with engine.connect() as conn:
-        existing = {
-            (
-                None if row[0] is None else str(row[0]),
-                str(row[1]),
-            )
-            for row in conn.execute(query, params)
-            if (
-                None if row[0] is None else str(row[0]),
-                str(row[1]),
-            ) in expected_pairs
-        }
-
-    if existing:
-        sample = ", ".join(
-            f"{pair[0] or '<NULL>'}/{pair[1]}"
-            for pair in sorted(existing, key=lambda pair: (pair[0] or "", pair[1]))[:5]
-        )
-        raise RuntimeError(
-            "Refusing to append duplicate MMR results for replay_code(s): "
-            f"{sample}. Existing rows: {len(existing):,}."
-        )
-
-
-def _is_missing(value: Any) -> bool:
-    return value is None or (isinstance(value, float) and value != value)
 
 
 def _validate_identifier(value: str) -> None:
