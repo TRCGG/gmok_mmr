@@ -114,15 +114,25 @@ MMR 계산은 `player_code`를 본인 귀속 계정으로 사용합니다.
 `mmr_player_account`로 부여하여 본캐 전적으로 계산합니다. 경기 결과의
 `player_code`는 실제 참가 계정을 유지하고, 사용자 요약의 `player_code`는
 MMR 귀속 계정을 뜻합니다. 적용 전 `migrations/005_add_mmr_player_account.sql`을
-실행해야 합니다. 배치를 재실행하면 계산 대상 경기 결과와 해당 길드의 최신 사용자
-요약을 한 트랜잭션에서 교체합니다.
+실행해야 합니다. 배치를 재실행하면 계산 대상 길드·시즌의 경기 결과와 사용자 요약을
+한 트랜잭션에서 교체합니다.
 
-결과 저장 테이블을 먼저 생성합니다.
+migration은 DB마다 번호 순서대로 **한 번만** 적용합니다. 배치 스크립트는 migration을
+실행하지 않고, 필요한 컬럼이 없으면 실행 전에 중단합니다.
 
 ```bash
 psql -d <DB_NAME> -f migrations/001_create_mmr_result_tables.sql
 psql -d <DB_NAME> -f migrations/003_alter_tables.sql
+psql -d <DB_NAME> -f migrations/004_rename_summary_position_columns.sql
+psql -d <DB_NAME> -f migrations/005_add_mmr_player_account.sql
+psql -d <DB_NAME> -f migrations/006_add_position_report.sql
+psql -d <DB_NAME> -f migrations/007_add_result_unique_keys.sql
+psql -d <DB_NAME> -f migrations/008_add_season.sql
 ```
+
+- 006: 유저 요약에 포지션별 지표·스타일 JSON(`position_report`) 추가
+- 007: 결과 `(guild_id, replay_code, player_code)`, 요약 `(guild_id, player_code)` 고유 인덱스
+- 008: 결과·요약에 `season` 추가, 요약 고유 키를 `(guild_id, player_code, season)`으로 교체
 
 현재 결과 저장 테이블은 계산 결과 중심 컬럼만 저장합니다. DB 조회 단계에서는 원본 notebook 기준 Game Impact metric을 맞추기 위해 더 많은 raw/derived 컬럼을 사용하지만, 저장 시에는 실제 결과 테이블에 존재하는 컬럼만 저장됩니다.
 
@@ -130,11 +140,8 @@ psql -d <DB_NAME> -f migrations/003_alter_tables.sql
 
 ## 실행
 
-DB에서 raw 데이터를 읽고 계산 결과를 DB에 저장합니다.
-
-```bash
-python tests/cli/main_pipeline.py --source db --sink db
-```
+DB 결과 테이블 저장은 길드·시즌 단위로 교체하므로 `scripts/run_mmr_once.py`로만 합니다
+(아래 과거 기록 전체 계산 참고). `tests/cli/main_pipeline.py`는 `--sink api`로만 동작합니다.
 
 백엔드 baseline 저장 API가 준비되기 전에는 DB 테스트 전용 경로를 사용합니다.
 아래 migration과 script는 운영 경로가 아니며, 백엔드 연동 후 삭제하거나 분리합니다.
@@ -145,18 +152,17 @@ python tests/cli/calculate_baseline_db.py --season 2026-S1 --baseline-version 20
 python tests/cli/calculate_full_mmr_with_db_baseline.py --season 2026-S1 --baseline-version 2026-06
 ```
 
-결과 테이블까지 저장하려면 전체 MMR 계산 명령에 `--save-results`를 추가합니다.
+이 스크립트는 계산만 합니다. `--save-results`는 막혀 있으며 결과 저장은 `scripts/run_mmr_once.py`를 사용합니다.
 
 기본값은 `.env`의 `MMR_DATA_SOURCE`, `MMR_RESULT_SINK`를 따릅니다.
 
-프론트 조회용 포지션별 지표·스타일을 기존 유저 요약 JSON에 함께 저장하려면 다음
-명령을 실행합니다. 경기별 MMR 이력은 기존 경기 결과를 사용합니다. 이 명령은
-`006_add_position_report.sql`, `007_add_result_unique_keys.sql`을 적용한 뒤 전체 MMR
-배치를 연속 실행합니다. 배치는 계산 대상 길드의 경기 결과와 유저 요약을 한
-트랜잭션에서 통째로 교체합니다.
+과거 기록 전체 계산은 아래 배치로 한 번 실행합니다. 006~008 migration을 먼저 적용해야
+합니다. 시즌은 경기의 `custom_match.season`을 따르며, 시즌마다 초기 MMR부터 따로
+계산합니다. 유저 요약은 길드·선수·시즌별 1행이고, 포지션별 지표·스타일은
+`position_report` JSON에 함께 저장합니다. 경기별 MMR 이력은 경기 결과 테이블을 사용합니다.
 
 ```bash
-python scripts/run_mmr_report_once.py
+python scripts/run_mmr_once.py
 ```
 
 ## 테스트

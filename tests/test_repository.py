@@ -82,3 +82,36 @@ def test_jsonb_dtype_skips_frames_without_report_column():
     import pandas as pd
 
     assert repository._jsonb_dtype(pd.DataFrame({"guild_id": ["g"]})) == {}
+
+
+def test_replace_delete_is_scoped_to_guild_and_season():
+    import pandas as pd
+
+    class _Conn:
+        def execute(self, statement, params):
+            self.sql = str(statement)
+            self.params = params
+
+    conn = _Conn()
+    matches = pd.DataFrame(
+        {
+            "guild_id": ["g", "g", "g"],
+            "season": ["2026", "2026", "2027"],
+            "replay_code": ["r1", "r2", "r3"],
+        }
+    )
+
+    repository._delete_existing_season_scope(matches, conn, "mmr_match_results")
+
+    assert "guild_id = :guild_id AND season = :season" in conn.sql
+    assert conn.params == [
+        {"guild_id": "g", "season": "2026"},
+        {"guild_id": "g", "season": "2027"},
+    ]
+
+
+def test_raw_match_sql_reads_season_from_custom_match():
+    repository_source = inspect.getsource(repository)
+
+    assert "cm.season                                      AS season" in repository_source
+    assert "LEFT JOIN custom_match cm ON cm.id = pg.custom_match_id" in repository_source

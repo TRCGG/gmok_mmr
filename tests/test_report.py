@@ -132,3 +132,11 @@ def test_result_unique_key_migration_matches_replace_keys():
 
     assert "ON mmr_match_results (guild_id, replay_code, player_code)" in sql
     assert "ON mmr_user_summary (guild_id, player_code)" in sql
+
+
+def test_season_migration_moves_summary_key_to_season():
+    sql = open("migrations/008_add_season.sql", encoding="utf-8").read()
+
+    assert "FROM custom_match cm" in sql
+    assert "DROP INDEX IF EXISTS uq_mmr_user_summary_guild_player;" in sql
+    assert "ON mmr_user_summary (guild_id, player_code, season)" in sql

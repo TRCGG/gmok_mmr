@@ -31,6 +31,7 @@ from mmr import (
     select_available_metrics,
     update_mmr_elo,
 )
+from harness.config import get_result_sink
 from harness.data_loader import load_match_dataframe
 from harness.data_writer import save_mmr_results
 
@@ -40,6 +41,13 @@ def run_pipeline(
     sink: str | None = None,
     position_weights=None,
 ):
+    if (sink or get_result_sink()).lower() == "db":
+        # DB 결과 테이블은 길드·시즌 단위로 교체 저장한다. 시즌별 계산은
+        # scripts/run_mmr_once.py만 지원한다.
+        raise SystemExit(
+            "DB sink is no longer supported here. "
+            "Use scripts/run_mmr_once.py to write season-scoped MMR results."
+        )
     raw_df = load_match_dataframe(source=source)
     clean_df = clean_match_data(raw_df, convert_duration_to_minutes=True)
     feature_df = add_basic_features(clean_df)

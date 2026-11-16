@@ -41,6 +41,13 @@ def main() -> None:
     parser.add_argument("--calculation-id", default="db-test-full-mmr")
     parser.add_argument("--save-results", action="store_true")
     args = parser.parse_args()
+    if args.save_results:
+        # 결과 테이블은 길드·시즌 단위로 교체 저장한다. 이 스크립트는 시즌별 계산과
+        # season 컬럼을 만들지 않으므로 저장은 scripts/run_mmr_once.py로만 한다.
+        raise SystemExit(
+            "--save-results is no longer supported. "
+            "Use scripts/run_mmr_once.py to write season-scoped MMR results."
+        )
 
     source_table = os.environ.get("MMR_PLAYER_GAME_TABLE", "player_game")
 

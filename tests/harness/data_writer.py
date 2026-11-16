@@ -23,11 +23,16 @@ def save_mmr_results(
     match_results: pd.DataFrame,
     user_summary: pd.DataFrame,
     sink: str | None = None,
+    *,
+    replace_scopes: pd.DataFrame | None = None,
 ) -> None:
-    """row 단위 결과와 요약 결과를 설정된 저장 방식으로 저장한다."""
+    """row 단위 결과와 요약 결과를 설정된 저장 방식으로 저장한다.
+
+    ``replace_scopes``는 DB 저장 시 교체할 ``(guild_id, season)`` 계산 대상 범위다.
+    """
     sink = (sink or get_result_sink()).lower()
     if sink == "db":
-        _save_results_to_db(match_results, user_summary)
+        _save_results_to_db(match_results, user_summary, replace_scopes)
         return
     if sink == "api":
         _save_results_to_api(match_results, user_summary)
@@ -41,18 +46,34 @@ def _stamp(df: pd.DataFrame) -> pd.DataFrame:
     out = out.drop(columns=["player_game_id"], errors="ignore")
     float_cols = out.select_dtypes(include="floating").columns
     out[float_cols] = out[float_cols].round(2)
+    # JSON 컬럼(예: position_report) 안의 실수도 고정 컬럼과 같은 자릿수로 맞춘다.
+    for column in out.select_dtypes(include="object").columns:
+        if out[column].map(lambda value: isinstance(value, dict)).any():
+            out[column] = out[column].map(_round_nested)
     out["calculated_at"] = datetime.now(UTC)
     return out
+
+
+def _round_nested(value):
+    if isinstance(value, dict):
+        return {key: _round_nested(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_round_nested(item) for item in value]
+    if isinstance(value, float):
+        return round(value, 2)
+    return value
 
 
 def _save_results_to_db(
     match_results: pd.DataFrame,
     user_summary: pd.DataFrame,
+    replace_scopes: pd.DataFrame | None = None,
 ) -> None:
     """계산된 MMR 결과를 PostgreSQL 테이블에 교체 저장한다."""
     save_mmr_results_to_db(
         _stamp(match_results),
         _stamp(user_summary),
+        replace_scopes,
     )
 
 
