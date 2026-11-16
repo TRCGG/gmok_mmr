@@ -28,10 +28,23 @@ from harness.db_test.config import get_db_url
 from scripts.run_mmr_once import main as run_mmr_once
 
 
+REPORT_MIGRATIONS = (
+    "006_add_position_report.sql",
+    "007_add_result_unique_keys.sql",
+)
+
+
 def apply_report_migration() -> None:
-    migration_path = ROOT / "migrations" / "006_create_mmr_report_tables.sql"
-    sql = migration_path.read_text(encoding="utf-8")
     engine = create_engine(get_db_url())
+    try:
+        for name in REPORT_MIGRATIONS:
+            _execute_migration(engine, ROOT / "migrations" / name)
+    finally:
+        engine.dispose()
+
+
+def _execute_migration(engine, migration_path: Path) -> None:
+    sql = migration_path.read_text(encoding="utf-8")
     raw_connection = engine.raw_connection()
     try:
         cursor = raw_connection.cursor()
@@ -45,7 +58,6 @@ def apply_report_migration() -> None:
         raise
     finally:
         raw_connection.close()
-        engine.dispose()
     print(f"Applied migration: {migration_path.name}")
 
 

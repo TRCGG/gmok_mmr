@@ -66,12 +66,13 @@ def test_position_report_holds_style_when_reference_group_is_too_small():
 
 def test_report_migration_extends_existing_summary_with_json():
     sql = open(
-        "migrations/006_create_mmr_report_tables.sql", encoding="utf-8"
+        "migrations/006_add_position_report.sql", encoding="utf-8"
     ).read()
 
     assert "ALTER TABLE mmr_user_summary" in sql
     assert "position_report JSONB" in sql
     assert "CREATE TABLE" not in sql
+    assert "USING GIN" not in sql
 
 
 def test_active_member_filter_merges_alt_account_and_excludes_departed_member():
@@ -116,6 +117,18 @@ def test_position_report_is_attached_as_json_and_excludes_departed_user():
 
     enriched = attach_position_report(summary, active)
 
+    top_report = enriched.iloc[0]["position_report"]["TOP"]
     assert enriched["player_code"].tolist() == ["main-0"]
-    assert enriched.iloc[0]["position_report"]["TOP"]["games"] == 20
-    assert enriched.iloc[0]["position_report"]["TOP"]["base_style"] == "분류 준비 상태"
+    assert top_report["base_style"] == "분류 준비 상태"
+    assert top_report["dpm"] == 100
+    # 포지션 MMR·판수·승률은 요약 고정 컬럼에만 저장한다.
+    assert not {"mmr", "games", "winrate"} & set(top_report)
+
+
+def test_result_unique_key_migration_matches_replace_keys():
+    sql = open(
+        "migrations/007_add_result_unique_keys.sql", encoding="utf-8"
+    ).read()
+
+    assert "ON mmr_match_results (guild_id, replay_code, player_code)" in sql
+    assert "ON mmr_user_summary (guild_id, player_code)" in sql

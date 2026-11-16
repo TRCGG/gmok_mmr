@@ -18,6 +18,8 @@ STYLE_METRICS = (
     "exp_per_min", "kda", "game_n_person_contribution",
     "game_impact_vs_opponent",
 )
+# 유저 요약의 포지션 고정 컬럼과 겹치는 값. position_report JSON에는 넣지 않는다.
+SUMMARY_COLUMN_FIELDS = ("mmr", "games", "winrate")
 StyleRule = tuple[str, Callable[[dict[str, float]], bool]]
 
 BASE_STYLE_RULES: tuple[StyleRule, ...] = (
@@ -152,12 +154,17 @@ def attach_position_report(
 
     ``position_summary``는 활성 길드원 필터가 적용된 결과여야 한다. 따라서
     inner join을 사용해 탈퇴 유저를 최종 요약 저장 대상에서도 제외한다.
+    포지션 MMR·판수·승률은 요약의 ``{pos}_mmr/_games/_winrate`` 컬럼에만 두고
+    JSON에는 지표와 스타일만 담는다.
     """
     keys = ["guild_id", "player_code"]
     _require_columns(user_summary, set(keys))
     _require_columns(position_summary, {*keys, "position"})
 
-    payload_columns = [column for column in position_summary.columns if column not in keys]
+    payload_columns = [
+        column for column in position_summary.columns
+        if column not in {*keys, *SUMMARY_COLUMN_FIELDS}
+    ]
     reports = []
     for key_values, group in position_summary.groupby(keys, sort=False):
         position_report = {}

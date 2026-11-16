@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import pandas as pd
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.dialects.postgresql import JSONB
 
 from .config import (
     get_db_url,
@@ -17,6 +18,9 @@ from .config import (
     get_player_game_table,
     get_player_table,
 )
+
+# dict 값을 담는 결과 컬럼. dtype을 지정하지 않으면 psycopg2가 dict를 바인딩하지 못한다.
+JSONB_RESULT_COLUMNS = ("position_report",)
 
 
 def load_match_dataframe_from_db(guild_id: str | None = None) -> pd.DataFrame:
@@ -151,7 +155,7 @@ def save_mmr_results_to_db(
         matches = _align_to_table_columns(
             match_results, conn, get_mmr_match_result_table()
         )
-        _delete_existing_match_rows(matches, conn, get_mmr_match_result_table())
+        _delete_existing_guild_scope(matches, conn, get_mmr_match_result_table())
         matches.to_sql(
             get_mmr_match_result_table(),
             conn,
@@ -161,7 +165,7 @@ def save_mmr_results_to_db(
             chunksize=1000,
         )
         summary = _align_to_table_columns(user_summary, conn, get_mmr_summary_table())
-        _delete_existing_summary_scope(matches, conn, get_mmr_summary_table())
+        _delete_existing_guild_scope(matches, conn, get_mmr_summary_table())
         summary.to_sql(
             get_mmr_summary_table(),
             conn,
@@ -169,6 +173,7 @@ def save_mmr_results_to_db(
             index=False,
             method="multi",
             chunksize=1000,
+            dtype=_jsonb_dtype(summary),
         )
 
 
@@ -183,22 +188,17 @@ def _align_to_table_columns(
     return df[keep_cols]
 
 
-def _delete_existing_match_rows(df: pd.DataFrame, conn, table_name: str) -> None:
-    """재계산 범위의 기존 경기 결과를 새 결과 저장 전에 제거한다."""
-    if df.empty:
-        return
-    keys = df[["guild_id", "replay_code"]].drop_duplicates().to_dict(orient="records")
-    conn.execute(
-        text(
-            f"DELETE FROM {table_name} "
-            "WHERE guild_id = :guild_id AND replay_code = :replay_code"
-        ),
-        keys,
-    )
+def _jsonb_dtype(df: pd.DataFrame) -> dict[str, JSONB]:
+    """to_sql에 넘길 JSONB 컬럼 dtype 매핑을 만든다."""
+    return {column: JSONB() for column in JSONB_RESULT_COLUMNS if column in df.columns}
 
 
-def _delete_existing_summary_scope(df: pd.DataFrame, conn, table_name: str) -> None:
-    """계산 대상 길드의 이전 요약을 제거해 탈퇴 유저 행도 함께 정리한다."""
+def _delete_existing_guild_scope(df: pd.DataFrame, conn, table_name: str) -> None:
+    """전체 재계산 대상 길드의 이전 결과를 제거한다.
+
+    전체 계산은 길드의 모든 경기를 처음부터 다시 계산하므로, 이번 계산에서 빠진
+    경기(원천 삭제·계정 충돌 거부)의 예전 결과와 탈퇴 유저 요약도 함께 정리한다.
+    """
     if df.empty:
         return
     guilds = df[["guild_id"]].drop_duplicates().to_dict(orient="records")

@@ -42,7 +42,6 @@ raw match rows
 ```text
 .
 ├── archive/notebooks/              # 원본 notebook, 변환 py 보관
-├── docs/                           # 작업 로그, 로직 리뷰, 통합 로직 참고 문서
 ├── migrations/                     # DB DDL migration
 ├── scripts/
 │   └── run_api_server.py           # 운영 API 서버 실행
@@ -152,7 +151,9 @@ python tests/cli/calculate_full_mmr_with_db_baseline.py --season 2026-S1 --basel
 
 프론트 조회용 포지션별 지표·스타일을 기존 유저 요약 JSON에 함께 저장하려면 다음
 명령을 실행합니다. 경기별 MMR 이력은 기존 경기 결과를 사용합니다. 이 명령은
-`006_create_mmr_report_tables.sql`을 적용한 뒤 전체 MMR 배치를 연속 실행합니다.
+`006_add_position_report.sql`, `007_add_result_unique_keys.sql`을 적용한 뒤 전체 MMR
+배치를 연속 실행합니다. 배치는 계산 대상 길드의 경기 결과와 유저 요약을 한
+트랜잭션에서 통째로 교체합니다.
 
 ```bash
 python scripts/run_mmr_report_once.py

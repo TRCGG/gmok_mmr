@@ -59,3 +59,26 @@ def test_full_mmr_db_test_script_loads_baseline_before_calculation():
     assert "load_mmr_baseline_from_db_test" in script_source
     assert "calculate_full_mmr" in script_source
     assert "--save-results" in script_source
+
+
+def test_position_report_is_bound_as_jsonb_for_psycopg2():
+    import json
+
+    import pandas as pd
+    from sqlalchemy.dialects.postgresql import JSONB, psycopg2
+
+    summary = pd.DataFrame(
+        [{"guild_id": "g", "player_code": "p", "position_report": {"TOP": {"games": 20}}}]
+    )
+    dtype = repository._jsonb_dtype(summary)
+
+    assert set(dtype) == {"position_report"}
+    assert isinstance(dtype["position_report"], JSONB)
+    bind = dtype["position_report"].bind_processor(psycopg2.dialect())
+    assert json.loads(bind({"TOP": {"games": 20}})) == {"TOP": {"games": 20}}
+
+
+def test_jsonb_dtype_skips_frames_without_report_column():
+    import pandas as pd
+
+    assert repository._jsonb_dtype(pd.DataFrame({"guild_id": ["g"]})) == {}
