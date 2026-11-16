@@ -64,7 +64,6 @@ from harness.db_test.config import (
     get_mmr_summary_table,
 )
 from harness.db_test.baseline_repository import save_mmr_baseline_to_db_test
-from harness.db_test.account_mapping import attach_mmr_player_account, reject_duplicate_mmr_accounts
 from harness.db_test.repository import load_guild_members_for_mmr, load_match_dataframe_from_db
 
 
@@ -91,14 +90,12 @@ def main() -> None:
             f"season={season_filter or 'all'!r}, guild_id={guild_id or 'all'!r} "
             "will be recalculated. Other seasons/guilds keep their existing rows."
         )
-    # 계정 충돌 거부·5v5 검증 전 범위로 잡아, 경기가 전부 빠진 길드·시즌의 예전 행도 교체한다.
+    # 5v5 검증 전 범위로 잡아, 경기가 전부 빠진 길드·시즌의 예전 행도 교체한다.
     replace_scopes = raw_df[["guild_id", "season"]].drop_duplicates().reset_index(drop=True)
 
+    # MMR은 부캐 매핑을 보지 않는다. 부캐도 실제 계정(player_code)으로 별도 MMR을 갖는다.
+    raw_df = raw_df.assign(mmr_player_account=raw_df["player_code"])
     members = load_guild_members_for_mmr(guild_id=guild_id)
-    raw_df = attach_mmr_player_account(raw_df, members)
-    raw_df, rejected_matches = reject_duplicate_mmr_accounts(raw_df)
-    if raw_df.empty:
-        raise RuntimeError("No valid matches remain after MMR account conflict checks.")
 
     _assert_result_tables_ready()
     _assert_baseline_table_ready()
@@ -127,10 +124,7 @@ def main() -> None:
         season_runs=season_runs,
         calculation_id=calculation_id,
         guild_id=guild_id,
-        rejected_matches=rejected_matches,
     )
-    if rejected_matches:
-        print(f"Rejected {len(rejected_matches):,} matches with duplicate MMR accounts.")
     # 모든 시즌 계산이 끝난 뒤에 baseline을 저장해, 중간 실패 시 baseline만 바뀌지 않게 한다.
     for run in season_runs:
         save_mmr_baseline_to_db_test(run["baseline_payload"], is_active=True)
@@ -220,18 +214,20 @@ def _calculate_season(
     )
 
     match_results = _prepare_match_results(result["match_results"], guild_id)
-    user_summary = _prepare_user_summary(result["user_summary"], match_results)
+    all_players = _prepare_user_summary(result["user_summary"], match_results)
     position_summary = filter_active_guild_members(
         build_user_position_report(match_results), members
     )
-    user_summary = attach_position_report(user_summary, position_summary)
+    user_summary = attach_position_report(all_players, position_summary)
+    _assert_active_members_found(match_results, user_summary, season)
     match_results = match_results.assign(season=season)
     user_summary = user_summary.assign(season=season)
     print(
         f"Calculated season {season!r}: "
         f"{result['metadata']['match_count']:,} matches, "
         f"{result['metadata']['player_game_row_count']:,} rows, "
-        f"{len(user_summary):,} summary rows."
+        f"{len(user_summary):,} summary rows "
+        f"({len(all_players) - len(user_summary):,} non-member players excluded)."
     )
     return {
         "season": season,
@@ -241,6 +237,27 @@ def _calculate_season(
         "user_summary": user_summary,
         "position_summary": position_summary.assign(season=season),
     }
+
+
+def _assert_active_members_found(match_results, user_summary, season: str) -> None:
+    """현재 길드원 판정이 통째로 실패해 요약을 비운 채 저장하지 않도록 막는다.
+
+    해산 등으로 한 길드의 길드원이 0명일 수는 있으므로 경고만 하고, 시즌 전체
+    요약이 0행이면 길드원 테이블 설정이나 status 판정 오류로 보고 중단한다.
+    """
+    if user_summary.empty:
+        raise RuntimeError(
+            f"Season {season!r} has no current guild members in the summary. "
+            "Check MMR_GUILD_MEMBER_TABLE and guild_member.status before saving."
+        )
+    empty_guilds = sorted(
+        set(match_results["guild_id"].astype(str)) - set(user_summary["guild_id"].astype(str))
+    )
+    if empty_guilds:
+        print(
+            f"WARNING: season {season!r} guilds with no current members in summary: "
+            f"{empty_guilds}"
+        )
 
 
 def _assert_baseline_usable(baseline_payload: dict[str, Any], season: str) -> None:
@@ -290,6 +307,15 @@ def _prepare_match_results(rows: list[dict[str, Any]], guild_id: str | None):
         raise RuntimeError("Calculated matches contain missing guild_id values.")
     if guild_id is not None and not out["guild_id"].eq(guild_id).all():
         raise RuntimeError("Calculated matches contain a different guild_id than requested.")
+    # MMR은 부캐 매핑을 보지 않으므로 귀속 계정은 항상 실제 참가 계정과 같아야 한다.
+    if "mmr_player_account" in out.columns:
+        mismatched = out[out["mmr_player_account"].ne(out["player_code"])]
+        if not mismatched.empty:
+            sample = mismatched[["guild_id", "replay_code", "player_code", "mmr_player_account"]]
+            raise RuntimeError(
+                "mmr_player_account must equal player_code (no alt-account mapping). "
+                f"Sample: {sample.head().to_dict('records')}"
+            )
     return out
 
 
@@ -320,7 +346,6 @@ def _build_report(
     season_runs: list[dict[str, Any]],
     calculation_id: str,
     guild_id: str | None,
-    rejected_matches: list[dict[str, Any]],
 ) -> dict[str, Any]:
     return {
         "calculation_id": calculation_id,
@@ -328,7 +353,6 @@ def _build_report(
         "seasons": [run["season"] for run in season_runs],
         "baseline_version": season_runs[0]["result"].get("baseline_version"),
         "metadata": {
-            "rejected_match_count": len(rejected_matches),
             "seasons": {
                 run["season"]: {
                     **run["result"]["metadata"],
@@ -348,7 +372,6 @@ def _build_report(
         "position_summary": [
             row for run in season_runs for row in run["position_summary"].to_dict(orient="records")
         ],
-        "rejected_matches": rejected_matches,
     }
 
 

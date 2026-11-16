@@ -136,10 +136,10 @@ def load_user_name_dataframe_from_db() -> pd.DataFrame:
 
 
 def load_guild_members_for_mmr(guild_id: str | None = None) -> pd.DataFrame:
-    """현재 활성 길드 멤버의 계정 귀속 관계를 일괄 조회한다."""
+    """길드원 계정과 활동 상태를 일괄 조회한다(현재 길드원 판정용)."""
     table_name = get_guild_member_table()
     query = text(
-        f"SELECT guild_id, account, main_account, is_main, status FROM {table_name} "
+        f"SELECT guild_id, account, status FROM {table_name} "
         "WHERE is_deleted = false"
         + (" AND guild_id = :guild_id" if guild_id is not None else "")
     )
@@ -234,7 +234,7 @@ def _delete_existing_season_scope(scopes: pd.DataFrame, conn, table_name: str) -
     """전체 재계산 대상 길드·시즌의 이전 결과를 제거한다.
 
     전체 계산은 길드·시즌의 모든 경기를 처음부터 다시 계산하므로, 이번 계산에서 빠진
-    경기(원천 삭제·계정 충돌 거부)의 예전 결과와 탈퇴 유저 요약도 함께 정리한다.
+    경기(원천 삭제·5v5 검증 탈락)의 예전 결과와 탈퇴 유저 요약도 함께 정리한다.
     계산하지 않은 시즌의 결과는 건드리지 않는다.
     """
     if scopes.empty:

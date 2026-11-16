@@ -102,20 +102,29 @@ MMR_SUMMARY_TABLE=mmr_user_summary
 
 ## DB migration
 
-MMR 계산의 유저 식별자는 `mmr_player_account`입니다. 전적과 포지션별 MMR은
-`(guild_id, mmr_player_account)`별로 독립적으로 계산되며, 같은 사람이 다른 길드에서
-처음 경기하면 해당 길드의 초기 MMR에서 시작합니다. `player_code`는 실제 경기
-계정이고 원본 `puuid`는 Riot 계정 식별용입니다. DB 입력은 `player_game`과
-`riot_account`의 `player_code`를 사용합니다. 기존 API 입력에 귀속 필드가 없으면
-MMR 계산은 `player_code`를 본인 귀속 계정으로 사용합니다.
+MMR 계산의 유저 식별자는 실제 경기 계정인 `player_code`입니다. 전적과 포지션별 MMR은
+`(guild_id, player_code)`별로 독립적으로 계산되며, 같은 사람이 다른 길드에서 처음
+경기하면 해당 길드의 초기 MMR에서 시작합니다. 원본 `puuid`는 Riot 계정 식별용입니다.
+DB 입력은 `player_game`과 `riot_account`의 `player_code`를 사용합니다.
+`mmr_player_account` 컬럼은 백엔드 계약상 유지하며 항상 `player_code`와 같은 값입니다.
+다른 값이 들어오면 배치가 저장 전에 중단합니다.
 
-`scripts/run_mmr_once.py` DB 배치는 `guild_member`의 활성 관계를 조회합니다.
-부캐(`is_main=false`) 경기에는 `main_account`의 본캐 코드를
-`mmr_player_account`로 부여하여 본캐 전적으로 계산합니다. 경기 결과의
-`player_code`는 실제 참가 계정을 유지하고, 사용자 요약의 `player_code`는
-MMR 귀속 계정을 뜻합니다. 적용 전 `migrations/005_add_mmr_player_account.sql`을
-실행해야 합니다. 배치를 재실행하면 계산 대상 길드·시즌의 경기 결과와 사용자 요약을
-한 트랜잭션에서 교체합니다.
+MMR은 부캐 매핑을 보지 않습니다. 부캐도 실제 계정 기준으로 별도 MMR을 가지며,
+`scripts/run_mmr_once.py` DB 배치는 `mmr_player_account`와 사용자 요약의
+`player_code`에 항상 실제 참가 계정의 `player_code`를 넣습니다(부캐 노출 여부는
+조회 단계에서 처리). `guild_member`는 현재 길드원(`status = '1'`) 판정에만 쓰며,
+사용자 요약에는 현재 길드원 계정만 저장합니다. 적용 전
+`migrations/005_add_mmr_player_account.sql`을 실행해야 합니다. 배치를 재실행하면
+계산 대상 길드·시즌의 경기 결과와 사용자 요약을 한 트랜잭션에서 교체합니다.
+
+서비스 시작 전 과거 기록 계산은 `MMR_SEASON`, `MMR_GUILD_ID`를 비워 **전체 범위로**
+실행합니다. 부분 실행하면 범위 밖에 예전 방식(부캐→본캐 귀속) 결과가 남을 수 있습니다.
+실행 후 아래 쿼리가 0이어야 합니다.
+
+```sql
+SELECT count(*) FROM mmr_match_results
+WHERE mmr_player_account IS DISTINCT FROM player_code;
+```
 
 migration은 DB마다 번호 순서대로 **한 번만** 적용합니다. 배치 스크립트는 migration을
 실행하지 않고, 필요한 컬럼이 없으면 실행 전에 중단합니다.

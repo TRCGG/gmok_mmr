@@ -131,20 +131,37 @@ def build_user_position_report(
 def filter_active_guild_members(
     position_summary: pd.DataFrame, guild_members: pd.DataFrame
 ) -> pd.DataFrame:
-    """현재 길드원만 남기되 부캐는 본캐 MMR 귀속 계정으로 통합한다."""
+    """현재 길드원(status = '1')인 실제 계정만 남긴다. 부캐도 자기 계정으로 판정한다.
+
+    DB 타입 차이(CHAR 패딩, 정수·NULL로 인한 ``1.0``)와 앞뒤 공백에 흔들리지 않도록
+    키와 상태를 문자열로 정규화해 비교한다.
+    """
     _require_columns(position_summary, {"guild_id", "player_code"})
-    _require_columns(guild_members, {"guild_id", "account", "main_account", "status"})
-    active = guild_members[guild_members["status"].astype(str).eq("1")].copy()
-    active["player_code"] = active["main_account"].where(
-        active["main_account"].notna(), active["account"]
+    _require_columns(guild_members, {"guild_id", "account", "status"})
+    status = _text(guild_members["status"])
+    is_active = (
+        status.eq("1").fillna(False)
+        | pd.to_numeric(status, errors="coerce").eq(1).fillna(False)
+    ).astype(bool)
+    active = guild_members.loc[is_active]
+    active_keys = pd.DataFrame({
+        "_guild_key": _text(active["guild_id"]),
+        "_account_key": _text(active["account"]),
+    }).dropna().drop_duplicates()
+    keyed = position_summary.assign(
+        _guild_key=_text(position_summary["guild_id"]),
+        _account_key=_text(position_summary["player_code"]),
     )
-    active_keys = active[["guild_id", "player_code"]].drop_duplicates()
-    return position_summary.merge(
+    return keyed.merge(
         active_keys,
-        on=["guild_id", "player_code"],
+        on=["_guild_key", "_account_key"],
         how="inner",
         validate="many_to_one",
-    )
+    ).drop(columns=["_guild_key", "_account_key"])
+
+
+def _text(series: pd.Series) -> pd.Series:
+    return series.astype("string").str.strip()
 
 
 def attach_position_report(

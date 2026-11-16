@@ -60,7 +60,7 @@ def _season_rows(season: str, games: int, start_day: int = 0) -> pd.DataFrame:
 
 def _members() -> pd.DataFrame:
     return pd.DataFrame([
-        {"guild_id": "g", "account": f"p{i}", "main_account": None, "status": "1"}
+        {"guild_id": "g", "account": f"p{i}", "status": "1"}
         for i in range(10)
     ])
 
@@ -162,3 +162,51 @@ def test_cli_db_save_paths_are_blocked(monkeypatch):
 
     with pytest.raises(SystemExit, match="run_mmr_once.py"):
         main_pipeline.run_pipeline(source="db", sink="db")
+
+
+def test_alt_account_keeps_its_own_mmr_and_summary_row():
+    season_df = _season_rows("2026", games=6)
+    alt_games = season_df["player_code"].eq("p0") & season_df["replay_code"].isin(["2026-r0", "2026-r1"])
+    season_df.loc[alt_games, ["player_code", "mmr_player_account"]] = "p0-alt"
+    members = pd.concat(
+        [_members(), pd.DataFrame([{"guild_id": "g", "account": "p0-alt", "status": "1"}])],
+        ignore_index=True,
+    )
+
+    run = _calculate_season(
+        season_df,
+        season="2026",
+        baseline_version="test",
+        guild_id=None,
+        calculation_id="test",
+        members=members,
+    )
+    summary = run["user_summary"].set_index("player_code")
+    matches = run["match_results"]
+
+    assert summary.loc["p0-alt", "total_games"] == 2
+    assert summary.loc["p0", "total_games"] == 4
+    # 본캐 첫 경기는 부캐 MMR을 이어받지 않고 초기값에서 시작한다.
+    first_main_game = matches[matches["player_code"].eq("p0")].sort_values("played_at").iloc[0]
+    assert first_main_game["pre_game_pos_mmr"] == 1300
+
+
+def test_season_with_no_current_members_stops_before_saving():
+    nobody = pd.DataFrame({"guild_id": ["g"], "account": ["someone-else"], "status": ["1"]})
+
+    with pytest.raises(RuntimeError, match="no current guild members"):
+        _calculate_season(
+            _season_rows("2026", games=6),
+            season="2026",
+            baseline_version="test",
+            guild_id=None,
+            calculation_id="test",
+            members=nobody,
+        )
+
+
+def test_match_results_reject_alt_account_attribution():
+    rows = [{"guild_id": "g", "replay_code": "r1", "player_code": "p0-alt", "mmr_player_account": "p0"}]
+
+    with pytest.raises(RuntimeError, match="must equal player_code"):
+        run_mmr_once._prepare_match_results(rows, guild_id=None)

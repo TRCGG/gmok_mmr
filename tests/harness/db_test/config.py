@@ -43,7 +43,7 @@ def get_player_table() -> str:
 
 
 def get_guild_member_table() -> str:
-    """본캐·부캐 관계를 읽을 길드 멤버 테이블명."""
+    """현재 길드원(status) 판정에 쓸 길드 멤버 테이블명."""
     return _safe_sql_identifier(os.environ.get("MMR_GUILD_MEMBER_TABLE", "guild_member"))
 
 

@@ -20,8 +20,8 @@ def _report_rows(user_count: int = 5, games: int = 20) -> pd.DataFrame:
             rows.append(
                 {
                     "guild_id": "guild-1",
-                    "player_code": f"alt-{user_index}",
-                    "mmr_player_account": f"main-{user_index}",
+                    "player_code": f"player-{user_index}",
+                    "mmr_player_account": f"player-{user_index}",
                     "position": "TOP",
                     "replay_code": f"game-{user_index}-{game_index}",
                     "played_at": start + timedelta(days=game_index),
@@ -48,7 +48,7 @@ def _report_rows(user_count: int = 5, games: int = 20) -> pd.DataFrame:
 
 def test_position_report_classifies_with_five_eligible_users():
     report = build_user_position_report(_report_rows())
-    strongest = report.loc[report["player_code"].eq("main-4")].iloc[0]
+    strongest = report.loc[report["player_code"].eq("player-4")].iloc[0]
 
     assert strongest["games"] == 20
     assert strongest["reference_users"] == 5
@@ -75,50 +75,42 @@ def test_report_migration_extends_existing_summary_with_json():
     assert "USING GIN" not in sql
 
 
-def test_active_member_filter_merges_alt_account_and_excludes_departed_member():
+def test_active_member_filter_uses_actual_account_without_alt_mapping():
     report = build_user_position_report(_report_rows(user_count=2))
+    # player-0은 player-1의 부캐지만 MMR은 부캐 매핑을 보지 않는다.
+    # 부캐도 자기 계정의 status로 현재 길드원인지 판정한다.
     members = pd.DataFrame(
         [
-            {
-                "guild_id": "guild-1",
-                "account": "alt-active",
-                "main_account": "main-0",
-                "status": "1",
-            },
-            {
-                "guild_id": "guild-1",
-                "account": "main-1",
-                "main_account": None,
-                "status": "2",
-            },
+            {"guild_id": "guild-1", "account": "player-0", "main_account": "player-1", "status": "1"},
+            {"guild_id": "guild-1", "account": "player-1", "main_account": None, "status": "2"},
         ]
     )
 
     active = filter_active_guild_members(report, members)
 
-    assert active["player_code"].tolist() == ["main-0"]
+    assert active["player_code"].tolist() == ["player-0"]
 
 
 def test_position_report_is_attached_as_json_and_excludes_departed_user():
     report = build_user_position_report(_report_rows(user_count=2))
     members = pd.DataFrame(
         [
-            {"guild_id": "guild-1", "account": "main-0", "main_account": None, "status": "1"},
-            {"guild_id": "guild-1", "account": "main-1", "main_account": None, "status": "2"},
+            {"guild_id": "guild-1", "account": "player-0", "status": "1"},
+            {"guild_id": "guild-1", "account": "player-1", "status": "2"},
         ]
     )
     active = filter_active_guild_members(report, members)
     summary = pd.DataFrame(
         [
-            {"guild_id": "guild-1", "player_code": "main-0", "total_mmr": 1300},
-            {"guild_id": "guild-1", "player_code": "main-1", "total_mmr": 1400},
+            {"guild_id": "guild-1", "player_code": "player-0", "total_mmr": 1300},
+            {"guild_id": "guild-1", "player_code": "player-1", "total_mmr": 1400},
         ]
     )
 
     enriched = attach_position_report(summary, active)
 
     top_report = enriched.iloc[0]["position_report"]["TOP"]
-    assert enriched["player_code"].tolist() == ["main-0"]
+    assert enriched["player_code"].tolist() == ["player-0"]
     assert top_report["base_style"] == "분류 준비 상태"
     assert top_report["dpm"] == 100
     # 포지션 MMR·판수·승률은 요약 고정 컬럼에만 저장한다.
@@ -140,3 +132,29 @@ def test_season_migration_moves_summary_key_to_season():
     assert "FROM custom_match cm" in sql
     assert "DROP INDEX IF EXISTS uq_mmr_user_summary_guild_player;" in sql
     assert "ON mmr_user_summary (guild_id, player_code, season)" in sql
+
+
+def test_active_member_filter_normalizes_status_and_keys():
+    report = build_user_position_report(_report_rows(user_count=4))
+    members = pd.DataFrame(
+        {
+            "guild_id": ["guild-1"] * 4,
+            # 정수 컬럼에 NULL이 섞이면 pandas가 1.0으로 읽는다. CHAR 패딩·공백도 허용한다.
+            "account": ["player-0", " player-1 ", "player-2", "player-3"],
+            "status": [1.0, "1 ", None, 2.0],
+        }
+    )
+
+    active = filter_active_guild_members(report, members)
+
+    assert sorted(active["player_code"]) == ["player-0", "player-1"]
+    assert "_guild_key" not in active.columns
+
+
+def test_active_member_filter_tolerates_duplicate_member_rows():
+    report = build_user_position_report(_report_rows(user_count=1))
+    members = pd.DataFrame(
+        {"guild_id": ["guild-1"] * 2, "account": ["player-0"] * 2, "status": ["1", "1"]}
+    )
+
+    assert filter_active_guild_members(report, members)["player_code"].tolist() == ["player-0"]
