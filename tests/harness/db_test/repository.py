@@ -187,6 +187,20 @@ def save_mmr_results_to_db(
         )
 
 
+def count_existing_results(scopes: pd.DataFrame) -> int:
+    """교체 대상 (guild_id, season) 범위에 이미 저장된 경기 결과 행 수를 센다."""
+    if scopes.empty:
+        return 0
+    table_name = get_mmr_match_result_table()
+    engine = create_engine(get_db_url())
+    query = text(
+        f"SELECT count(*) FROM {table_name} WHERE guild_id = :guild_id AND season = :season"
+    )
+    records = scopes[["guild_id", "season"]].drop_duplicates().to_dict(orient="records")
+    with engine.connect() as conn:
+        return sum(conn.execute(query, record).scalar_one() for record in records)
+
+
 def _resolve_replace_scopes(
     match_results: pd.DataFrame,
     user_summary: pd.DataFrame,

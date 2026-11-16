@@ -11,6 +11,7 @@ from ..gold.baseline import (
     calculate_service_baseline,
     game_impact_baseline_from_payload,
     service_baseline_to_payload,
+    validate_baseline_payload,
 )
 from ..silver.features import BASE_METRICS, add_basic_features, select_available_metrics
 from ..silver.game_impact import (
@@ -33,6 +34,10 @@ from ..gold.mmr import (
 from ..silver.cleaning import clean_match_data, drop_invalid_matches
 
 
+class NoValidMatchesError(RuntimeError):
+    """5v5 구조 검증을 통과한 경기가 하나도 없을 때 낸다."""
+
+
 def calculate_baseline_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """시즌 전체 클랜 경기 payload를 받아 baseline payload를 반환한다."""
     matches = payload.get("matches")
@@ -45,11 +50,14 @@ def calculate_baseline_payload(payload: dict[str, Any]) -> dict[str, Any]:
         baseline_version=payload.get("baseline_version"),
         season=payload.get("season"),
     )
-    return service_baseline_to_payload(
+    baseline_payload = service_baseline_to_payload(
         baseline,
         match_count=feature_df[["guild_id", "replay_code"]].drop_duplicates().shape[0],
         player_game_row_count=len(feature_df),
     )
+    # 최소 경기 수(200판) 미만이거나 퇴화한 baseline은 반환하지 않는다(400 응답).
+    validate_baseline_payload(baseline_payload)
+    return baseline_payload
 
 
 def calculate_full_mmr(payload: dict[str, Any]) -> dict[str, Any]:
@@ -143,7 +151,7 @@ def build_base_feature_dataframe(raw_df: pd.DataFrame) -> pd.DataFrame:
     clean_df = clean_match_data(raw_df, convert_duration_to_minutes=True)
     clean_df = drop_invalid_matches(clean_df)
     if clean_df.empty:
-        raise RuntimeError("유효한 경기가 없습니다. 모든 경기가 5v5 구조 검증에서 제외되었습니다.")
+        raise NoValidMatchesError("유효한 경기가 없습니다. 모든 경기가 5v5 구조 검증에서 제외되었습니다.")
     return add_basic_features(clean_df)
 
 

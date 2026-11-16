@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import pandas as pd
 
@@ -9,6 +10,8 @@ from mmr.gold.report import (
     build_user_position_report,
     filter_active_guild_members,
 )
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def _report_rows(user_count: int = 5, games: int = 20) -> pd.DataFrame:
@@ -66,7 +69,7 @@ def test_position_report_holds_style_when_reference_group_is_too_small():
 
 def test_report_migration_extends_existing_summary_with_json():
     sql = open(
-        "migrations/006_add_position_report.sql", encoding="utf-8"
+        ROOT / "migrations/006_add_position_report.sql", encoding="utf-8"
     ).read()
 
     assert "ALTER TABLE mmr_user_summary" in sql
@@ -119,7 +122,7 @@ def test_position_report_is_attached_as_json_and_excludes_departed_user():
 
 def test_result_unique_key_migration_matches_replace_keys():
     sql = open(
-        "migrations/007_add_result_unique_keys.sql", encoding="utf-8"
+        ROOT / "migrations/007_add_result_unique_keys.sql", encoding="utf-8"
     ).read()
 
     assert "ON mmr_match_results (guild_id, replay_code, player_code)" in sql
@@ -127,7 +130,7 @@ def test_result_unique_key_migration_matches_replace_keys():
 
 
 def test_season_migration_moves_summary_key_to_season():
-    sql = open("migrations/008_add_season.sql", encoding="utf-8").read()
+    sql = open(ROOT / "migrations/008_add_season.sql", encoding="utf-8").read()
 
     assert "FROM custom_match cm" in sql
     assert "DROP INDEX IF EXISTS uq_mmr_user_summary_guild_player;" in sql

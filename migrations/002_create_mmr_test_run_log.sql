@@ -1,6 +1,6 @@
 -- MMR DB 테스트 실행 기록 테이블
 --
--- calculate_baseline_db.py, calculate_full_mmr_with_db_baseline.py 실행마다
+-- tests/cli/calculate_full_mmr_with_db_baseline.py 실행마다
 -- 소요시간과 리소스 사용량을 기록한다.
 
 CREATE TABLE IF NOT EXISTS mmr_test_run_log (

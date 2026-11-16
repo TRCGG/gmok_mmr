@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 import importlib
+from pathlib import Path
 import random
 
 import pandas as pd
 import pytest
 
 from harness.db_test import repository
+from harness.season import normalize_season
 from scripts import run_mmr_once
+from scripts.calculate_baseline import build_season_baseline
 from scripts.run_mmr_once import _calculate_season
 
+ROOT = Path(__file__).resolve().parents[1]
 POSITIONS = ("TOP", "JUG", "MID", "ADC", "SUP")
 
 
@@ -65,14 +69,24 @@ def _members() -> pd.DataFrame:
     ])
 
 
-def _run(season_df: pd.DataFrame, season: str):
+def _baseline(season: str, games: int = 6) -> dict:
+    # 합성 데이터는 경기 수가 적으므로 최소 경기 수만 낮춰 실제 계산 경로로 만든다.
+    return build_season_baseline(
+        _season_rows(season, games=games),
+        season=season,
+        baseline_version="test",
+        min_matches=1,
+    )
+
+
+def _run(season_df: pd.DataFrame, season: str, baseline: dict | None = None, members=None):
     return _calculate_season(
         season_df,
         season=season,
-        baseline_version="test",
+        baseline_payload=baseline or _baseline(season),
         guild_id=None,
         calculation_id="test",
-        members=_members(),
+        members=_members() if members is None else members,
     )
 
 
@@ -93,21 +107,55 @@ def test_each_season_starts_from_initial_mmr_and_keeps_one_summary_row():
     assert combined["season"].map(type).eq(str).all()
 
 
-def test_calculate_season_does_not_write_baseline(monkeypatch):
-    monkeypatch.setattr(
-        run_mmr_once,
-        "save_mmr_baseline_to_db_test",
-        lambda *args, **kwargs: pytest.fail("baseline must be saved after every season"),
-    )
-
-    run = _run(_season_rows("2026", games=6), "2026")
+def test_new_season_can_use_previous_season_baseline():
+    run = _run(_season_rows("2027", games=3, start_day=30), "2027", baseline=_baseline("2026"))
 
     assert run["baseline_payload"]["season"] == "2026"
+    assert set(run["match_results"]["season"]) == {"2027"}
+    opening_game = run["match_results"].loc[lambda df: df["replay_code"].eq("2027-r0")]
+    assert opening_game["pre_game_pos_mmr"].eq(1300).all()
 
 
-def test_tiny_season_baseline_is_rejected_before_saving():
-    with pytest.raises(RuntimeError, match="unusable"):
-        _run(_season_rows("2027", games=1), "2027")
+def test_baseline_requires_minimum_matches():
+    raw = _season_rows("2026", games=6)
+
+    assert build_season_baseline(raw, season="2026", baseline_version="v", min_matches=6)
+    with pytest.raises(SystemExit, match="match_count=6 < 7"):
+        build_season_baseline(raw, season="2026", baseline_version="v", min_matches=7)
+
+
+def test_baseline_default_minimum_is_200_matches():
+    with pytest.raises(SystemExit, match="match_count=6 < 200"):
+        build_season_baseline(_season_rows("2026", games=6), season="2026", baseline_version="v")
+
+
+def test_degenerate_baseline_is_rejected_even_above_minimum():
+    with pytest.raises(SystemExit, match="no Game Impact weights"):
+        build_season_baseline(
+            _season_rows("2027", games=1), season="2027", baseline_version="v", min_matches=1
+        )
+
+
+def test_baseline_uses_only_the_requested_season():
+    raw = pd.concat([_season_rows("2026", games=6), _season_rows("2027", games=3)])
+
+    payload = build_season_baseline(raw, season="2026", baseline_version="v", min_matches=1)
+
+    assert payload["metadata"]["match_count"] == 6
+
+
+def test_season_baseline_falls_back_and_is_validated(monkeypatch):
+    built = _baseline("2026")
+    # DB에 저장된 baseline은 생성 시 200판 이상이어야 한다(합성 데이터 경기 수만 보정).
+    previous = {**built, "metadata": {**built["metadata"], "match_count": 200}}
+    monkeypatch.setattr(run_mmr_once, "load_baseline_for_season", lambda season: previous)
+
+    assert run_mmr_once._load_season_baseline("2027") is previous
+
+    tiny = {**previous, "metadata": {**previous["metadata"], "match_count": 50}}
+    monkeypatch.setattr(run_mmr_once, "load_baseline_for_season", lambda season: tiny)
+    with pytest.raises(SystemExit, match="match_count=50 < 200"):
+        run_mmr_once._load_season_baseline("2027")
 
 
 def test_season_without_valid_5v5_match_is_skipped():
@@ -119,9 +167,9 @@ def test_season_without_valid_5v5_match_is_skipped():
 def test_season_values_are_stripped_strings_and_blank_is_rejected():
     raw = pd.DataFrame({"replay_code": ["a", "b"], "season": [2026, " 2027 "]})
 
-    assert run_mmr_once._season_values(raw).tolist() == ["2026", "2027"]
+    assert normalize_season(raw).tolist() == ["2026", "2027"]
     with pytest.raises(RuntimeError, match=r"Missing for: \['b'\]"):
-        run_mmr_once._season_values(pd.DataFrame({"replay_code": ["a", "b"], "season": ["2026", " "]}))
+        normalize_season(pd.DataFrame({"replay_code": ["a", "b"], "season": ["2026", " "]}))
 
 
 def test_replace_scopes_require_season_and_cover_saved_rows():
@@ -150,7 +198,7 @@ def test_replace_scopes_keep_target_scope_without_results():
 
 
 def test_unique_key_migration_skips_summary_dedupe_after_season_exists():
-    sql = open("migrations/007_add_result_unique_keys.sql", encoding="utf-8").read()
+    sql = open(ROOT / "migrations/007_add_result_unique_keys.sql", encoding="utf-8").read()
     guard = sql.index("column_name = 'season'")
 
     assert guard < sql.index("DELETE FROM mmr_user_summary")
@@ -173,14 +221,7 @@ def test_alt_account_keeps_its_own_mmr_and_summary_row():
         ignore_index=True,
     )
 
-    run = _calculate_season(
-        season_df,
-        season="2026",
-        baseline_version="test",
-        guild_id=None,
-        calculation_id="test",
-        members=members,
-    )
+    run = _run(season_df, "2026", members=members)
     summary = run["user_summary"].set_index("player_code")
     matches = run["match_results"]
 
@@ -195,14 +236,7 @@ def test_season_with_no_current_members_stops_before_saving():
     nobody = pd.DataFrame({"guild_id": ["g"], "account": ["someone-else"], "status": ["1"]})
 
     with pytest.raises(RuntimeError, match="no current guild members"):
-        _calculate_season(
-            _season_rows("2026", games=6),
-            season="2026",
-            baseline_version="test",
-            guild_id=None,
-            calculation_id="test",
-            members=nobody,
-        )
+        _run(_season_rows("2026", games=6), "2026", members=nobody)
 
 
 def test_match_results_reject_alt_account_attribution():
@@ -210,3 +244,21 @@ def test_match_results_reject_alt_account_attribution():
 
     with pytest.raises(RuntimeError, match="must equal player_code"):
         run_mmr_once._prepare_match_results(rows, guild_id=None)
+
+
+def test_results_record_the_baseline_used():
+    own = _run(_season_rows("2026", games=6), "2026")
+    carried = _run(_season_rows("2027", games=3, start_day=30), "2027", baseline=_baseline("2026"))
+
+    assert set(own["match_results"]["baseline_season"]) == {"2026"}
+    assert set(carried["match_results"]["baseline_season"]) == {"2026"}
+    assert set(carried["match_results"]["season"]) == {"2027"}
+    assert set(carried["match_results"]["baseline_version"]) == {"test"}
+    assert "baseline_season" not in carried["user_summary"].columns
+
+
+def test_result_baseline_migration_adds_columns():
+    sql = open(ROOT / "migrations/009_add_result_baseline.sql", encoding="utf-8").read()
+
+    assert "ADD COLUMN IF NOT EXISTS baseline_season" in sql
+    assert "ADD COLUMN IF NOT EXISTS baseline_version" in sql

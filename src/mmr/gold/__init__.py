@@ -2,10 +2,12 @@
 
 from .baseline import (
     ServiceBaseline,
+    MIN_BASELINE_MATCHES,
     calculate_service_baseline,
     game_impact_baseline_from_payload,
     game_impact_baseline_to_payload,
     service_baseline_to_payload,
+    validate_baseline_payload,
 )
 from .mmr import (
     DEFAULT_MMR_SETTINGS,
@@ -25,6 +27,8 @@ __all__ = [
     "game_impact_baseline_from_payload",
     "game_impact_baseline_to_payload",
     "service_baseline_to_payload",
+    "MIN_BASELINE_MATCHES",
+    "validate_baseline_payload",
     "DEFAULT_MMR_SETTINGS",
     "MMRBaselineStats",
     "MMRRuntimeState",

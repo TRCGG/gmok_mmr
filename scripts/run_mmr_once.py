@@ -1,32 +1,35 @@
-"""Run the MMR calculation once using values loaded from ``.env``.
+"""Run the full MMR calculation once using values loaded from ``.env``.
 
 This is a one-time DB batch helper. It reads raw player-game rows, calculates
-the baseline, saves it, calculates full MMR, and saves the results when both
-the configured database tables are ready.
+full MMR per season with the stored baseline, and saves the results.
 
 Usage::
 
+    python scripts/calculate_baseline.py --season 2026 --baseline-version 20261117
     python scripts/run_mmr_once.py
 
 Seasons come from each match's ``custom_match.season``. Every season is
-calculated independently from the initial MMR with its own baseline.
+calculated independently from the initial MMR. Baselines are not calculated here:
+each season uses its active baseline from ``scripts/calculate_baseline.py``, or the
+most recently saved active baseline when the season has none yet. Only baselines
+made by ``scripts/calculate_baseline.py`` (``metadata.scope = all_guilds``) are used.
 
-Required .env values::
-
-    MMR_BASELINE_VERSION=2026-09
+Existing results in the target guilds/seasons are replaced. Because the backend
+owns results after service start, the batch stops when target results already exist
+unless ``MMR_ALLOW_RECALCULATE=1`` is set.
 
 Optional .env values::
 
     MMR_SEASON=2026             # omitted/empty means every season in the data
     MMR_GUILD_ID=your-guild-id  # omitted/empty means all guilds
-    MMR_CALCULATION_ID=mmr-once-2026-09
+    MMR_ALLOW_RECALCULATE=1     # replace existing results in the target range
+    MMR_CALCULATION_ID=mmr-once-2026-all
     MMR_OUTPUT_FILE=./output/mmr-once.json
 """
 
 from __future__ import annotations
 
 import json
-import math
 import os
 from pathlib import Path
 import re
@@ -47,14 +50,13 @@ except ImportError as exc:  # pragma: no cover - dependency is in requirements.t
 
 load_dotenv(ROOT / ".env")
 
-from mmr.gold.baseline import calculate_service_baseline, service_baseline_to_payload
-from mmr.gold.mmr import DEFAULT_POSITIONS
+from mmr.gold.baseline import validate_baseline_payload
 from mmr.gold.report import (
     attach_position_report,
     build_user_position_report,
     filter_active_guild_members,
 )
-from mmr.serving.service import calculate_full_mmr, build_base_feature_dataframe
+from mmr.serving.service import NoValidMatchesError, calculate_full_mmr
 from harness.config import get_output_dir
 from harness.data_writer import save_mmr_results
 from harness.db_test.config import (
@@ -63,26 +65,33 @@ from harness.db_test.config import (
     get_mmr_match_result_table,
     get_mmr_summary_table,
 )
-from harness.db_test.baseline_repository import save_mmr_baseline_to_db_test
-from harness.db_test.repository import load_guild_members_for_mmr, load_match_dataframe_from_db
+from harness.db_test.baseline_repository import (
+    BASELINE_SCOPE_ALL_GUILDS,
+    load_baseline_for_season,
+)
+from harness.db_test.repository import (
+    count_existing_results,
+    load_guild_members_for_mmr,
+    load_match_dataframe_from_db,
+)
+from harness.season import normalize_season
 
 
 def main() -> None:
     import pandas as pd
 
     season_filter = os.environ.get("MMR_SEASON", "").strip() or None
-    baseline_version = _required_env("MMR_BASELINE_VERSION")
     guild_id = os.environ.get("MMR_GUILD_ID", "").strip() or None
     scope_name = guild_id or "all"
     print(f"Loading raw MMR rows for guild_id={guild_id!r} ...")
     raw_df = load_match_dataframe_from_db(guild_id=guild_id)
     if raw_df.empty:
         raise SystemExit("No eligible player-game rows were found for MMR_GUILD_ID.")
-    raw_df = raw_df.assign(season=_season_values(raw_df))
+    raw_df = raw_df.assign(season=normalize_season(raw_df))
     seasons = _target_seasons(raw_df, season_filter)
     raw_df = raw_df[raw_df["season"].isin(seasons)]
     calculation_id = os.environ.get("MMR_CALCULATION_ID", "").strip() or (
-        f"mmr-once-{'+'.join(seasons)}-{baseline_version}-{scope_name}"
+        f"mmr-once-{'+'.join(seasons)}-{scope_name}"
     )
     if season_filter is not None or guild_id is not None:
         print(
@@ -99,6 +108,9 @@ def main() -> None:
 
     _assert_result_tables_ready()
     _assert_baseline_table_ready()
+    _assert_recalculation_allowed(replace_scopes)
+    # 계산 전에 모든 시즌의 baseline을 확인해, 중간에 baseline이 없어 멈추지 않게 한다.
+    baselines = {season: _load_season_baseline(season) for season in seasons}
 
     season_runs = []
     for season in seasons:
@@ -106,7 +118,7 @@ def main() -> None:
         season_run = None if season_df.empty else _calculate_season(
             season_df,
             season=season,
-            baseline_version=baseline_version,
+            baseline_payload=baselines[season],
             guild_id=guild_id,
             calculation_id=calculation_id,
             members=members,
@@ -125,14 +137,6 @@ def main() -> None:
         calculation_id=calculation_id,
         guild_id=guild_id,
     )
-    # 모든 시즌 계산이 끝난 뒤에 baseline을 저장해, 중간 실패 시 baseline만 바뀌지 않게 한다.
-    for run in season_runs:
-        save_mmr_baseline_to_db_test(run["baseline_payload"], is_active=True)
-        print(
-            "Saved baseline "
-            f"{baseline_version!r} for season {run['season']!r} "
-            f"(guild_id={guild_id!r})."
-        )
     save_mmr_results(match_results, user_summary, sink="db", replace_scopes=replace_scopes)
     report["saved_to_db"] = True
     output_path = _write_report(report, calculation_id)
@@ -140,28 +144,9 @@ def main() -> None:
     print("APPLIED: MMR results were written to the configured result tables.")
 
 
-def _season_values(raw_df):
-    """경기의 custom_match.season을 공백 없는 문자열로 맞추고 빈 값은 거부한다."""
-    if "season" not in raw_df.columns:
-        raise RuntimeError("Raw matches require custom_match.season values.")
-    seasons = raw_df["season"]
-    blank = seasons.isna() | seasons.astype(str).str.strip().eq("")
-    if blank.any():
-        missing = raw_df.loc[blank]
-        sample = (
-            missing["replay_code"].drop_duplicates().head(5).tolist()
-            if "replay_code" in missing.columns
-            else missing.index[:5].tolist()
-        )
-        raise RuntimeError(
-            f"Raw matches require custom_match.season values. Missing for: {sample}"
-        )
-    return seasons.astype(str).str.strip()
-
-
 def _target_seasons(raw_df, season_filter: str | None) -> list[str]:
     """계산할 시즌 목록을 경기의 custom_match.season 기준으로 정한다."""
-    seasons = sorted(_season_values(raw_df).unique())
+    seasons = sorted(normalize_season(raw_df).unique())
     if season_filter is None:
         return seasons
     if season_filter not in seasons:
@@ -169,49 +154,76 @@ def _target_seasons(raw_df, season_filter: str | None) -> list[str]:
     return [season_filter]
 
 
+def _assert_recalculation_allowed(replace_scopes) -> None:
+    """대상 범위에 이미 결과가 있으면 명시적으로 허용했을 때만 교체한다.
+
+    서비스 시작 뒤에는 백엔드가 한 경기씩 이어서 계산하므로, 이 배치를 다시 돌리면
+    그 결과(시즌 중 baseline 전환 이력 포함)를 현재 baseline 하나로 덮어쓰게 된다.
+    """
+    existing = count_existing_results(replace_scopes)
+    if existing and os.environ.get("MMR_ALLOW_RECALCULATE", "").strip() != "1":
+        raise SystemExit(
+            f"{existing:,} result rows already exist in the target guilds/seasons. "
+            "This batch would delete and recalculate them. Set MMR_ALLOW_RECALCULATE=1 "
+            "only before service start (or to intentionally rebuild history)."
+        )
+    if existing:
+        print(f"MMR_ALLOW_RECALCULATE=1: replacing {existing:,} existing result rows.")
+
+
+def _load_season_baseline(season: str) -> dict[str, Any]:
+    """시즌의 활성 baseline(없으면 가장 최근 저장된 활성 baseline)을 읽고 검증한다."""
+    try:
+        baseline_payload = load_baseline_for_season(season)
+        validate_baseline_payload(baseline_payload)
+    except ValueError as exc:
+        raise SystemExit(f"Season {season!r}: {exc}") from exc
+    version = baseline_payload["baseline_version"]
+    if (baseline_payload.get("metadata") or {}).get("scope") != BASELINE_SCOPE_ALL_GUILDS:
+        raise SystemExit(
+            f"Season {season!r}: baseline {version!r} (season {baseline_payload['season']!r}) "
+            "was made by an old path, not scripts/calculate_baseline.py. Recreate it with "
+            "scripts/calculate_baseline.py before calculating MMR."
+        )
+    source = baseline_payload["season"]
+    note = (
+        ""
+        if source == season
+        else f" (season {season!r} has none yet; using latest saved baseline from season {source!r})"
+    )
+    print(f"Season {season!r} uses baseline {version!r}{note}.")
+    return baseline_payload
+
+
 def _calculate_season(
     season_df,
     *,
     season: str,
-    baseline_version: str,
+    baseline_payload: dict[str, Any],
     guild_id: str | None,
     calculation_id: str,
     members,
 ) -> dict[str, Any] | None:
-    """한 시즌을 초기 MMR부터 계산하고 결과·요약에 시즌을 붙인다.
+    """한 시즌을 초기 MMR부터 저장된 baseline으로 계산하고 결과·요약에 시즌을 붙인다.
 
-    DB에 쓰지 않는다. baseline은 반환값으로 넘겨 모든 시즌 계산 후 저장한다.
-    5v5 구조 검증을 통과한 경기가 없으면 ``None``을 반환한다.
+    DB에 쓰지 않는다. 5v5 구조 검증을 통과한 경기가 없으면 ``None``을 반환한다.
     """
+    # 5v5 검증 통과 경기가 없는 경우만 건너뛴다. 계산 중 다른 오류는 그대로 중단한다.
     try:
-        feature_df = build_base_feature_dataframe(season_df)
-    except RuntimeError as exc:
+        result = calculate_full_mmr(
+            {
+                "calculation_id": calculation_id,
+                "guild_id": guild_id,
+                "season": season,
+                "baseline_version": baseline_payload["baseline_version"],
+                "mmr_baseline": baseline_payload["mmr_baseline"],
+                "game_impact_baseline": baseline_payload["game_impact_baseline"],
+                "matches": season_df.to_dict(orient="records"),
+            }
+        )
+    except NoValidMatchesError as exc:
         print(f"Season {season!r}: {exc}")
         return None
-    baseline = calculate_service_baseline(
-        feature_df,
-        baseline_version=baseline_version,
-        season=season,
-    )
-    baseline_payload = service_baseline_to_payload(
-        baseline,
-        match_count=feature_df[["guild_id", "replay_code"]].drop_duplicates().shape[0],
-        player_game_row_count=len(feature_df),
-    )
-    baseline_payload["metadata"]["guild_id"] = guild_id
-    _assert_baseline_usable(baseline_payload, season)
-
-    result = calculate_full_mmr(
-        {
-            "calculation_id": calculation_id,
-            "guild_id": guild_id,
-            "season": season,
-            "baseline_version": baseline_version,
-            "mmr_baseline": baseline_payload["mmr_baseline"],
-            "game_impact_baseline": baseline_payload["game_impact_baseline"],
-            "matches": season_df.to_dict(orient="records"),
-        }
-    )
 
     match_results = _prepare_match_results(result["match_results"], guild_id)
     all_players = _prepare_user_summary(result["user_summary"], match_results)
@@ -220,7 +232,12 @@ def _calculate_season(
     )
     user_summary = attach_position_report(all_players, position_summary)
     _assert_active_members_found(match_results, user_summary, season)
-    match_results = match_results.assign(season=season)
+    # 어느 baseline으로 계산했는지 결과 행마다 남긴다(새 시즌 초반에는 가장 최근 저장된 baseline).
+    match_results = match_results.assign(
+        season=season,
+        baseline_season=baseline_payload["season"],
+        baseline_version=baseline_payload["baseline_version"],
+    )
     user_summary = user_summary.assign(season=season)
     print(
         f"Calculated season {season!r}: "
@@ -258,45 +275,6 @@ def _assert_active_members_found(match_results, user_summary, season: str) -> No
             f"WARNING: season {season!r} guilds with no current members in summary: "
             f"{empty_guilds}"
         )
-
-
-def _assert_baseline_usable(baseline_payload: dict[str, Any], season: str) -> None:
-    """표본이 부족해 퇴화한 baseline을 저장·사용하지 않도록 중단한다.
-
-    포지션별 승·패 표본이 부족하면 Game Impact 가중치가 비고 MMR 변화량이 고정폭이
-    된다. 그런 baseline이 활성화되면 백엔드도 같은 값으로 이후 경기를 계산한다.
-    """
-    weights = baseline_payload["game_impact_baseline"].get("position_weights") or {}
-    mmr_baseline = baseline_payload["mmr_baseline"]
-    problems = []
-    missing_positions = [pos for pos in DEFAULT_POSITIONS if not weights.get(pos)]
-    if missing_positions:
-        problems.append(f"no Game Impact weights for {missing_positions}")
-    for key in ("f1_mean", "f2_mean"):
-        value = mmr_baseline.get(key)
-        if value is None or not math.isfinite(value) or value == 0:
-            problems.append(f"{key}={value!r}")
-    for key in ("f1_position_mean", "f2_position_mean"):
-        means = mmr_baseline.get(key) or {}
-        bad = [pos for pos in DEFAULT_POSITIONS if not _is_finite(means.get(pos))]
-        if bad:
-            problems.append(f"{key} missing for {bad}")
-    if problems:
-        raise RuntimeError(
-            f"Baseline for season {season!r} is unusable (too few matches): "
-            + "; ".join(problems)
-        )
-
-
-def _is_finite(value: Any) -> bool:
-    return isinstance(value, (int, float)) and math.isfinite(value)
-
-
-def _required_env(name: str) -> str:
-    value = os.environ.get(name, "").strip()
-    if not value:
-        raise SystemExit(f"Missing required .env value: {name}")
-    return value
 
 
 def _prepare_match_results(rows: list[dict[str, Any]], guild_id: str | None):
@@ -351,14 +329,14 @@ def _build_report(
         "calculation_id": calculation_id,
         "guild_id": guild_id,
         "seasons": [run["season"] for run in season_runs],
-        "baseline_version": season_runs[0]["result"].get("baseline_version"),
         "metadata": {
             "seasons": {
                 run["season"]: {
                     **run["result"]["metadata"],
                     "user_count": int(run["user_summary"]["player_code"].nunique()),
                     "summary_row_count": len(run["user_summary"]),
-                    "baseline_metadata": run["baseline_payload"]["metadata"],
+                    "baseline_season": run["baseline_payload"]["season"],
+                    "baseline_version": run["baseline_payload"]["baseline_version"],
                 }
                 for run in season_runs
             },
@@ -404,11 +382,14 @@ def _assert_baseline_table_ready() -> None:
     _validate_identifier(table_name)
     engine = create_engine(get_db_url())
     required_columns = {
+        "id",
         "season",
         "baseline_version",
         "is_active",
         "mmr_baseline",
         "game_impact_baseline",
+        "metadata",
+        "saved_at",
     }
     with engine.connect() as conn:
         inspector = inspect(conn)
@@ -429,7 +410,8 @@ def _assert_result_tables_ready() -> None:
     engine = create_engine(get_db_url())
     required = {
         get_mmr_match_result_table(): {
-            "replay_code", "player_code", "mmr_player_account", "guild_id", "season"
+            "replay_code", "player_code", "mmr_player_account", "guild_id", "season",
+            "baseline_season", "baseline_version",
         },
         get_mmr_summary_table(): {"player_code", "guild_id", "season", "position_report"},
     }
