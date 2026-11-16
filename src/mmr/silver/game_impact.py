@@ -8,6 +8,8 @@
 1. ``derive_position_weights``        → 포지션별 RandomForest feature_importance
 2. ``compute_raw_game_impact``        → 포지션 가중합 (raw_game_impact)
 3. ``normalize_minmax_0_100``         → 전체 MinMax 0~100 (game_impact)
+                                       baseline이 있으면 ``apply_impact_range``로
+                                       시즌 전체 min/max 기준을 고정 적용
 4. ``normalize_by_position_outcome``  → (position × win/loss) Quantile→MinMax
                                        (game_impact_winloss_norm)
 5. ``compute_n_person_contribution``  → 게임 내 인분 (총합 10인분 기준)
@@ -33,11 +35,20 @@ class OutcomeNormalizationStats:
 
 
 @dataclass(frozen=True)
+class ImpactRange:
+    """game_impact 0~100 변환에 쓰는 raw_game_impact의 시즌 전체 최솟값·최댓값."""
+
+    lower: float
+    upper: float
+
+
+@dataclass(frozen=True)
 class GameImpactBaseline:
     """단일 경기 Game Impact 계산에 필요한 고정 baseline."""
 
     position_weights: pd.DataFrame
     outcome_stats: dict[tuple[str, int], OutcomeNormalizationStats]
+    impact_range: ImpactRange
 
     @classmethod
     def from_history(
@@ -56,6 +67,7 @@ class GameImpactBaseline:
         return cls(
             position_weights=resolved_weights,
             outcome_stats=derive_outcome_normalization_stats(history_df),
+            impact_range=derive_impact_range(history_df["raw_game_impact"]),
         )
 
 
@@ -183,6 +195,32 @@ def normalize_minmax_0_100(series: pd.Series) -> pd.Series:
     return pd.Series(arr.flatten(), index=series.index, name=series.name)
 
 
+def derive_impact_range(raw_impact: pd.Series) -> ImpactRange:
+    """이력 raw_game_impact의 최솟값·최댓값(노트북 MinMaxScaler 기준)을 구한다."""
+    values = raw_impact.replace([np.inf, -np.inf], np.nan).dropna()
+    if values.empty:
+        return ImpactRange(lower=float("nan"), upper=float("nan"))
+    return ImpactRange(lower=float(values.min()), upper=float(values.max()))
+
+
+def apply_impact_range(raw_impact: pd.Series, impact_range: ImpactRange) -> pd.Series:
+    """저장된 시즌 min/max로 raw_game_impact를 0~100 점수로 변환한다.
+
+    노트북의 ``MinMaxScaler(feature_range=(0, 100))``를 시즌 전체 이력에 fit한 것과
+    같은 변환이다. baseline과 같은 데이터에 적용하면 ``normalize_minmax_0_100`` 결과와
+    같고, 한 경기만 계산해도 시즌 전체 기준 점수가 나온다. 범위 밖 값은 0~100으로 자른다.
+    범위가 유효하지 않으면(표본 부족으로 퇴화한 baseline) NaN을 돌려준다. 그런 baseline은
+    ``validate_baseline_payload``에서 저장·사용이 거부된다.
+    """
+    data_range = impact_range.upper - impact_range.lower
+    if not np.isfinite(data_range) or data_range <= 0:
+        return pd.Series(np.nan, index=raw_impact.index, name=raw_impact.name)
+    # sklearn MinMaxScaler와 같은 연산 순서(scale_, min_)로 계산한다.
+    scale = 100 / data_range
+    scaled = raw_impact * scale - impact_range.lower * scale
+    return scaled.clip(lower=0, upper=100).rename(raw_impact.name)
+
+
 # =====================================================
 # 3) 포지션 × 승패 정규화 (game_impact_winloss_norm)
 # =====================================================
@@ -305,9 +343,11 @@ def apply_game_impact_baseline(
         baseline.position_weights,
     )
 
-    # raw_game_impact를 0~100 범위로 정규화
-    out["game_impact"] = normalize_minmax_0_100(
-        out["raw_game_impact"]
+    # 입력 행끼리 MinMax하지 않고 baseline의 시즌 전체 min/max로 0~100 변환한다.
+    # (전체 계산과 한 경기 계산이 같은 기준을 쓰도록)
+    out["game_impact"] = apply_impact_range(
+        out["raw_game_impact"],
+        baseline.impact_range,
     )
 
     # 현재 데이터로 재정규화하지 않고

@@ -75,3 +75,15 @@ def test_writer_stamp_normalizes_columns_before_save():
 def test_save_mmr_results_rejects_unknown_sink():
     with pytest.raises(ValueError, match="Unsupported MMR_RESULT_SINK"):
         save_mmr_results(pd.DataFrame(), pd.DataFrame(), sink="file")
+
+
+def test_writer_stamp_rounds_floats_inside_json_columns_like_fixed_columns():
+    report = {"TOP": {"dpm": 556.8333333333334, "reference_users": 5, "base_style": "운영형"}}
+    out = _stamp(pd.DataFrame({"top_winrate": [45.4321], "position_report": [report]}))
+
+    assert out["top_winrate"].item() == 45.43
+    assert out["position_report"].item() == {
+        "TOP": {"dpm": 556.83, "reference_users": 5, "base_style": "운영형"}
+    }
+    # 원본 계산 결과는 반올림하지 않는다.
+    assert report["TOP"]["dpm"] == 556.8333333333334

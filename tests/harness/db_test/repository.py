@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import pandas as pd
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.dialects.postgresql import JSONB
 
 from .config import (
     get_db_url,
@@ -18,6 +19,9 @@ from .config import (
     get_player_table,
 )
 
+# dict 값을 담는 결과 컬럼. dtype을 지정하지 않으면 psycopg2가 dict를 바인딩하지 못한다.
+JSONB_RESULT_COLUMNS = ("position_report",)
+
 
 def load_match_dataframe_from_db(guild_id: str | None = None) -> pd.DataFrame:
     """PostgreSQL에서 원천 player-game 레코드를 읽는다.
@@ -26,6 +30,7 @@ def load_match_dataframe_from_db(guild_id: str | None = None) -> pd.DataFrame:
         guild_id: 지정 시 해당 guild의 경기만 읽는다. None이면 전체.
 
     NOTE: ``is_deleted = false`` 와 ``is_mmr_eligible = true`` 행만 읽는다.
+    시즌은 계산 시점 값이 아니라 경기의 ``custom_match.season``을 읽는다.
 
     MMR 식별자는 player_code이며 길드별로 계산한다. player_game의
     player_code가 없으면 riot_account에서 보강한다. 원본 puuid는 계정
@@ -100,9 +105,11 @@ def load_match_dataframe_from_db(guild_id: str | None = None) -> pd.DataFrame:
             pg.on_my_way_pings                              AS on_my_way_pings,
             pg.command_pings                                AS command_pings,
             pg.create_date                                  AS created_at,
-            pg.played_date                                 AS played_at
+            pg.played_date                                 AS played_at,
+            cm.season                                      AS season
         FROM {player_game_table} pg
         LEFT JOIN riot_account ra ON ra.puuid = pg.puuid
+        LEFT JOIN custom_match cm ON cm.id = pg.custom_match_id
         {where_clause}
         """
     )
@@ -129,10 +136,10 @@ def load_user_name_dataframe_from_db() -> pd.DataFrame:
 
 
 def load_guild_members_for_mmr(guild_id: str | None = None) -> pd.DataFrame:
-    """현재 활성 길드 멤버의 계정 귀속 관계를 일괄 조회한다."""
+    """길드원 계정과 활동 상태를 일괄 조회한다(현재 길드원 판정용)."""
     table_name = get_guild_member_table()
     query = text(
-        f"SELECT guild_id, account, main_account, is_main FROM {table_name} "
+        f"SELECT guild_id, account, status FROM {table_name} "
         "WHERE is_deleted = false"
         + (" AND guild_id = :guild_id" if guild_id is not None else "")
     )
@@ -144,11 +151,22 @@ def load_guild_members_for_mmr(guild_id: str | None = None) -> pd.DataFrame:
 def save_mmr_results_to_db(
     match_results: pd.DataFrame,
     user_summary: pd.DataFrame,
+    replace_scopes: pd.DataFrame | None = None,
 ) -> None:
-    """계산된 MMR 결과를 PostgreSQL 결과 테이블에 추가 저장한다."""
+    """계산된 MMR 결과를 PostgreSQL 결과 테이블에 교체 저장한다.
+
+    ``replace_scopes``는 이번 계산 대상인 ``(guild_id, season)`` 목록이다. 계산 결과가
+    없는 범위(경기가 전부 제외된 길드·시즌)의 예전 행도 지우려면 계산 대상 기준으로
+    넘긴다. 생략하면 결과 행의 범위를 쓴다.
+    """
+    scopes = _resolve_replace_scopes(match_results, user_summary, replace_scopes)
     engine = create_engine(get_db_url())
     with engine.begin() as conn:
-        _align_to_table_columns(match_results, conn, get_mmr_match_result_table()).to_sql(
+        matches = _align_to_table_columns(
+            match_results, conn, get_mmr_match_result_table()
+        )
+        _delete_existing_season_scope(scopes, conn, get_mmr_match_result_table())
+        matches.to_sql(
             get_mmr_match_result_table(),
             conn,
             if_exists="append",
@@ -156,14 +174,58 @@ def save_mmr_results_to_db(
             method="multi",
             chunksize=1000,
         )
-        _align_to_table_columns(user_summary, conn, get_mmr_summary_table()).to_sql(
+        summary = _align_to_table_columns(user_summary, conn, get_mmr_summary_table())
+        _delete_existing_season_scope(scopes, conn, get_mmr_summary_table())
+        summary.to_sql(
             get_mmr_summary_table(),
             conn,
             if_exists="append",
             index=False,
             method="multi",
             chunksize=1000,
+            dtype=_jsonb_dtype(summary),
         )
+
+
+def count_existing_results(scopes: pd.DataFrame) -> int:
+    """교체 대상 (guild_id, season) 범위에 이미 저장된 경기 결과 행 수를 센다."""
+    if scopes.empty:
+        return 0
+    table_name = get_mmr_match_result_table()
+    engine = create_engine(get_db_url())
+    query = text(
+        f"SELECT count(*) FROM {table_name} WHERE guild_id = :guild_id AND season = :season"
+    )
+    records = scopes[["guild_id", "season"]].drop_duplicates().to_dict(orient="records")
+    with engine.connect() as conn:
+        return sum(conn.execute(query, record).scalar_one() for record in records)
+
+
+def _resolve_replace_scopes(
+    match_results: pd.DataFrame,
+    user_summary: pd.DataFrame,
+    replace_scopes: pd.DataFrame | None,
+) -> pd.DataFrame:
+    """교체할 (guild_id, season) 범위를 정하고, 저장할 행이 범위 안에 있는지 검증한다."""
+    keys = ["guild_id", "season"]
+    for name, frame in (("match_results", match_results), ("user_summary", user_summary)):
+        missing = set(keys) - set(frame.columns)
+        if missing:
+            raise ValueError(f"{name} is missing replace-scope columns: {sorted(missing)}")
+        if frame[keys].isna().any().any():
+            raise ValueError(f"{name} contains missing guild_id or season values.")
+
+    scopes = match_results[keys] if replace_scopes is None else replace_scopes[keys]
+    scopes = scopes.drop_duplicates().reset_index(drop=True)
+    if scopes.isna().any().any():
+        raise ValueError("Replace scopes contain missing guild_id or season values.")
+
+    scope_keys = set(scopes.itertuples(index=False, name=None))
+    for name, frame in (("match_results", match_results), ("user_summary", user_summary)):
+        outside = set(frame[keys].drop_duplicates().itertuples(index=False, name=None)) - scope_keys
+        if outside:
+            raise ValueError(f"{name} has rows outside the replace scopes: {sorted(outside)[:5]}")
+    return scopes
 
 
 def _align_to_table_columns(
@@ -175,3 +237,24 @@ def _align_to_table_columns(
     table_cols = {col["name"] for col in inspect(conn).get_columns(table_name)}
     keep_cols = [col for col in df.columns if col in table_cols]
     return df[keep_cols]
+
+
+def _jsonb_dtype(df: pd.DataFrame) -> dict[str, JSONB]:
+    """to_sql에 넘길 JSONB 컬럼 dtype 매핑을 만든다."""
+    return {column: JSONB() for column in JSONB_RESULT_COLUMNS if column in df.columns}
+
+
+def _delete_existing_season_scope(scopes: pd.DataFrame, conn, table_name: str) -> None:
+    """전체 재계산 대상 길드·시즌의 이전 결과를 제거한다.
+
+    전체 계산은 길드·시즌의 모든 경기를 처음부터 다시 계산하므로, 이번 계산에서 빠진
+    경기(원천 삭제·5v5 검증 탈락)의 예전 결과와 탈퇴 유저 요약도 함께 정리한다.
+    계산하지 않은 시즌의 결과는 건드리지 않는다.
+    """
+    if scopes.empty:
+        return
+    records = scopes[["guild_id", "season"]].drop_duplicates().to_dict(orient="records")
+    conn.execute(
+        text(f"DELETE FROM {table_name} WHERE guild_id = :guild_id AND season = :season"),
+        records,
+    )

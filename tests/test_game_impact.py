@@ -3,14 +3,21 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from mmr.gold.baseline import (
+    game_impact_baseline_from_payload,
+    game_impact_baseline_to_payload,
+)
 from mmr.silver.game_impact import (
     GameImpactBaseline,
+    ImpactRange,
     OutcomeNormalizationStats,
     apply_game_impact_baseline,
+    apply_impact_range,
     apply_outcome_normalization_stats,
     compute_n_person_contribution,
     compute_raw_game_impact,
     compute_vs_opponent,
+    derive_impact_range,
     derive_outcome_normalization_stats,
     normalize_by_position_outcome,
     normalize_minmax_0_100,
@@ -205,6 +212,7 @@ def test_apply_game_impact_baseline_builds_incremental_features():
             ("TOP", 1): OutcomeNormalizationStats(lower=0, upper=20),
             ("TOP", 0): OutcomeNormalizationStats(lower=0, upper=20),
         },
+        impact_range=ImpactRange(lower=0, upper=20),
     )
 
     out = apply_game_impact_baseline(df, baseline)
@@ -231,3 +239,98 @@ def test_derive_outcome_normalization_stats_returns_position_result_keys():
     assert ("TOP", 1) in stats
     assert ("TOP", 0) in stats
     assert stats[("TOP", 1)].lower < stats[("TOP", 1)].upper
+
+
+# ---------------------------------------------------------------------------
+# game_impact: 노트북처럼 시즌 전체 min/max 기준 0~100 (baseline에 저장)
+# ---------------------------------------------------------------------------
+
+def _history() -> pd.DataFrame:
+    rows = []
+    for game, (top_win, top_loss) in enumerate([(12, 3), (20, 8), (6, 1), (15, 9)]):
+        for player, result, kills in (("w", 1, top_win), ("l", 0, top_loss)):
+            rows.append({
+                "replay_code": f"g{game}",
+                "position": "TOP",
+                "game_result": result,
+                "kills": kills,
+                "assists": 0,
+                "player_code": f"{player}{game}",
+            })
+    return pd.DataFrame(rows)
+
+
+def _history_baseline(history: pd.DataFrame) -> GameImpactBaseline:
+    return GameImpactBaseline.from_history(
+        history,
+        metrics=["kills", "assists"],
+        position_weights=pd.DataFrame({"TOP": {"kills": 1.0, "assists": 0.0}}),
+    )
+
+
+def test_impact_range_is_history_min_max():
+    history = _history()
+
+    baseline = _history_baseline(history)
+
+    assert baseline.impact_range == ImpactRange(lower=1.0, upper=20.0)
+
+
+def test_full_history_game_impact_matches_notebook_minmax():
+    history = _history()
+    baseline = _history_baseline(history)
+
+    out = apply_game_impact_baseline(history, baseline)
+    notebook = normalize_minmax_0_100(
+        compute_raw_game_impact(history, baseline.position_weights)
+    )
+
+    assert np.allclose(out["game_impact"], notebook)
+
+
+def test_single_match_game_impact_uses_season_scale_not_match_scale():
+    history = _history()
+    baseline = _history_baseline(history)
+    full = apply_game_impact_baseline(history, baseline)
+
+    single = apply_game_impact_baseline(history[history["replay_code"].eq("g0")], baseline)
+
+    # 한 경기만 넣어도 시즌 전체 계산과 같은 점수가 나온다(10명 안 MinMax가 아님).
+    assert np.allclose(single["game_impact"], full.loc[single.index, "game_impact"])
+    assert not np.allclose(single["game_impact"], [100.0, 0.0])
+
+
+def test_game_impact_outside_season_range_is_clipped():
+    scored = apply_impact_range(pd.Series([0.0, 10.0, 30.0]), ImpactRange(lower=5.0, upper=25.0))
+
+    assert scored.tolist() == [0.0, 25.0, 100.0]
+
+
+def test_invalid_impact_range_returns_nan():
+    scored = apply_impact_range(pd.Series([1.0, 2.0]), ImpactRange(lower=3.0, upper=3.0))
+
+    assert scored.isna().all()
+    # 유효한 raw 값이 없으면 범위도 NaN이다.
+    assert np.isnan(derive_impact_range(pd.Series([np.nan, np.inf])).lower)
+
+
+def test_impact_range_round_trips_through_payload():
+    baseline = _history_baseline(_history())
+
+    payload = game_impact_baseline_to_payload(baseline)
+    restored = game_impact_baseline_from_payload(payload)
+
+    assert payload["impact_range"] == {"lower": 1.0, "upper": 20.0}
+    assert restored.impact_range == baseline.impact_range
+
+
+def test_payload_without_impact_range_is_rejected():
+    payload = game_impact_baseline_to_payload(_history_baseline(_history()))
+    del payload["impact_range"]
+
+    try:
+        game_impact_baseline_from_payload(payload)
+    except ValueError as exc:
+        assert "impact_range" in str(exc)
+    else:
+        raise AssertionError("baseline without impact_range must be rejected")
