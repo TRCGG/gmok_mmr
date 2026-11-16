@@ -13,6 +13,7 @@ import pandas as pd
 from ..silver.features import BASE_METRICS, select_available_metrics
 from ..silver.game_impact import (
     GameImpactBaseline,
+    ImpactRange,
     OutcomeNormalizationStats,
     apply_game_impact_baseline,
 )
@@ -91,6 +92,10 @@ def game_impact_baseline_to_payload(baseline: GameImpactBaseline) -> dict[str, A
             }
             for (position, result), stats in baseline.outcome_stats.items()
         ],
+        "impact_range": {
+            "lower": baseline.impact_range.lower,
+            "upper": baseline.impact_range.upper,
+        },
     }
 
 
@@ -103,9 +108,19 @@ def game_impact_baseline_from_payload(payload: dict[str, Any]) -> GameImpactBase
             lower=float(row["lower"]),
             upper=float(row["upper"]),
         )
+    impact_range = payload.get("impact_range")
+    if not impact_range:
+        raise ValueError(
+            "game_impact_baseline has no impact_range. "
+            "Recreate the baseline with scripts/calculate_baseline.py."
+        )
     return GameImpactBaseline(
         position_weights=position_weights,
         outcome_stats=outcome_stats,
+        impact_range=ImpactRange(
+            lower=float(impact_range["lower"]),
+            upper=float(impact_range["upper"]),
+        ),
     )
 
 
@@ -155,6 +170,11 @@ def validate_baseline_payload(
     ]
     if missing_outcomes:
         problems.append(f"no outcome_stats for {missing_outcomes}")
+
+    impact_range = game_impact.get("impact_range") or {}
+    lower, upper = impact_range.get("lower"), impact_range.get("upper")
+    if not (_is_finite(lower) and _is_finite(upper) and upper > lower):
+        problems.append(f"invalid game_impact impact_range={impact_range!r}")
 
     mmr_baseline = baseline_payload.get("mmr_baseline") or {}
     for key in ("f1_mean", "f2_mean"):

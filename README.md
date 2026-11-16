@@ -12,6 +12,7 @@ raw match rows
   -> add_basic_features
   -> derive or apply position weights
   -> raw_game_impact
+  -> game_impact (baseline의 시즌 전체 min/max 기준 0~100)
   -> game_impact_winloss_norm
   -> game_n_person_contribution
   -> game_impact_vs_opponent
@@ -23,7 +24,10 @@ raw match rows
 
 파이프라인은 단순 승패만 보지 않고 다음 값을 같이 반영합니다.
 
-- `Game Impact`: 포지션별 feature importance 기반 경기 영향도
+- `Game Impact`: 포지션별 feature importance 기반 경기 영향도. `game_impact`는 노트북처럼
+  시즌 전체 `raw_game_impact`의 최솟값·최댓값으로 0~100 변환하며, 이 범위를 baseline
+  (`game_impact_baseline.impact_range`)에 저장해 한 경기만 계산해도 같은 기준을 씁니다.
+  범위 밖 값은 0~100으로 자릅니다. MMR 계산에는 쓰이지 않습니다.
 - `game_n_person_contribution`: 한 경기 안에서 개인이 차지한 기여도 비중
 - `game_impact_vs_opponent`: 같은 경기, 같은 포지션 상대와의 영향도 비교
 - `ELO expected score`: 상대 MMR 대비 기대 성과

@@ -262,3 +262,21 @@ def test_result_baseline_migration_adds_columns():
 
     assert "ADD COLUMN IF NOT EXISTS baseline_season" in sql
     assert "ADD COLUMN IF NOT EXISTS baseline_version" in sql
+
+
+def test_batch_game_impact_equals_notebook_season_minmax():
+    import numpy as np
+
+    from mmr.silver.game_impact import normalize_minmax_0_100
+
+    run = _run(_season_rows("2026", games=6), "2026")
+    matches = run["match_results"]
+
+    # 시즌 자기 baseline으로 계산하면 노트북처럼 시즌 전체 MinMax와 같다.
+    assert np.allclose(matches["game_impact"], normalize_minmax_0_100(matches["raw_game_impact"]))
+    # 한 경기만 떼어 다시 계산해도 같은 점수가 나온다.
+    one_game = _season_rows("2026", games=6).loc[lambda df: df["replay_code"].eq("2026-r3")]
+    single = _run(one_game, "2026", baseline=run["baseline_payload"])["match_results"]
+    same_game = matches[matches["replay_code"].eq("2026-r3")].set_index("player_code")
+    expected = same_game.loc[single["player_code"], "game_impact"]
+    assert np.allclose(single["game_impact"], expected.to_numpy())

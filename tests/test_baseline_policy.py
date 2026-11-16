@@ -34,6 +34,7 @@ def _valid_payload(**metadata) -> dict:
                 for pos in POSITIONS
                 for result in (0, 1)
             ],
+            "impact_range": {"lower": -5.0, "upper": 120.0},
         },
         "metadata": {"match_count": 200, "scope": "all_guilds", **metadata},
     }
@@ -67,6 +68,7 @@ def test_degenerate_parts_are_rejected():
     payload["mmr_baseline"]["f1_mean"] = 0
     payload["game_impact_baseline"]["position_weights"]["TOP"] = {"dpm": 0.0, "kda": 0.0}
     payload["game_impact_baseline"]["position_weights"]["JUG"] = {"dpm": math.nan}
+    payload["game_impact_baseline"]["impact_range"] = {"lower": 3.0, "upper": 3.0}
     payload["game_impact_baseline"]["outcome_stats"] = [
         row for row in payload["game_impact_baseline"]["outcome_stats"]
         if not (row["position"] == "SUP" and row["game_result"] == 0)
@@ -80,6 +82,7 @@ def test_degenerate_parts_are_rejected():
     assert "invalid Game Impact weights for TOP" in message
     assert "invalid Game Impact weights for JUG" in message
     assert "no outcome_stats for ['SUP/0']" in message
+    assert "invalid game_impact impact_range" in message
 
 
 # ----------------------------------------------------------------------------
