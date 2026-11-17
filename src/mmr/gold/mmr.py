@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from fractions import Fraction
 
 import numpy as np
 import pandas as pd
@@ -148,7 +149,21 @@ class MMRRuntimeState:
 
         if total_games == 0:
             return DEFAULT_MMR_SETTINGS.initial_mmr
-        return int(round(weighted_sum / total_games))
+        # 판수 가중 평균은 .5가 자주 나오므로 분수로 정확히 계산해 반올림한다.
+        return round_half_away_from_zero(Fraction(weighted_sum, total_games))
+
+
+def round_half_away_from_zero(value: float | Fraction) -> int:
+    """.5에서 0에서 먼 쪽으로 반올림한다(-12.5 → -13, 1306.5 → 1307, 12.5 → 13).
+
+    Python ``round()``는 .5에서 짝수 쪽으로 가서(12.5 → 12) 백엔드·Postgres numeric
+    ``ROUND``와 1씩 갈린다. 정수 MMR 값(``mmr_change``, ``total_mmr``)에만 쓴다.
+    실수 float도 2진수 값 그대로 비교하므로 정확히 .5인 값만 동률로 본다.
+    """
+    exact = Fraction(value)
+    whole, remainder = divmod(abs(exact), 1)
+    rounded = int(whole) + (1 if remainder >= Fraction(1, 2) else 0)
+    return rounded if exact >= 0 else -rounded
 
 REQUIRED_MMR_COLUMNS: tuple[str, ...] = (
     "played_at",
@@ -456,7 +471,7 @@ def _apply_mmr_game(
             delta = settings.base_loss * final_factor * k
             delta = np.clip(min(delta, -12), settings.min_change, -12)
 
-        delta = int(round(delta))
+        delta = round_half_away_from_zero(delta)
         new_mmr = int(current_mmr + delta)
 
         row_copy = row.copy()

@@ -19,3 +19,6 @@ output/
 *.xlsx
 *.png
 pytest-cache-files-*/
+
+.env.*
+!.env.example

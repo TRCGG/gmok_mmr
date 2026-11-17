@@ -51,11 +51,7 @@ except ImportError as exc:  # pragma: no cover - dependency is in requirements.t
 load_dotenv(ROOT / ".env")
 
 from mmr.gold.baseline import validate_baseline_payload
-from mmr.gold.report import (
-    attach_position_report,
-    build_user_position_report,
-    filter_active_guild_members,
-)
+from mmr.gold.report import attach_position_report, build_user_position_report
 from mmr.serving.service import NoValidMatchesError, calculate_full_mmr
 from harness.config import get_output_dir
 from harness.data_writer import save_mmr_results
@@ -69,11 +65,7 @@ from harness.db_test.baseline_repository import (
     BASELINE_SCOPE_ALL_GUILDS,
     load_baseline_for_season,
 )
-from harness.db_test.repository import (
-    count_existing_results,
-    load_guild_members_for_mmr,
-    load_match_dataframe_from_db,
-)
+from harness.db_test.repository import count_existing_results, load_match_dataframe_from_db
 from harness.season import normalize_season
 
 
@@ -104,7 +96,6 @@ def main() -> None:
 
     # MMR은 부캐 매핑을 보지 않는다. 부캐도 실제 계정(player_code)으로 별도 MMR을 갖는다.
     raw_df = raw_df.assign(mmr_player_account=raw_df["player_code"])
-    members = load_guild_members_for_mmr(guild_id=guild_id)
 
     _assert_result_tables_ready()
     _assert_baseline_table_ready()
@@ -121,7 +112,6 @@ def main() -> None:
             baseline_payload=baselines[season],
             guild_id=guild_id,
             calculation_id=calculation_id,
-            members=members,
         )
         if season_run is None:
             print(f"Skipped season {season!r}: no valid matches remain.")
@@ -202,7 +192,6 @@ def _calculate_season(
     baseline_payload: dict[str, Any],
     guild_id: str | None,
     calculation_id: str,
-    members,
 ) -> dict[str, Any] | None:
     """한 시즌을 초기 MMR부터 저장된 baseline으로 계산하고 결과·요약에 시즌을 붙인다.
 
@@ -226,12 +215,11 @@ def _calculate_season(
         return None
 
     match_results = _prepare_match_results(result["match_results"], guild_id)
-    all_players = _prepare_user_summary(result["user_summary"], match_results)
-    position_summary = filter_active_guild_members(
-        build_user_position_report(match_results), members
-    )
-    user_summary = attach_position_report(all_players, position_summary)
-    _assert_active_members_found(match_results, user_summary, season)
+    user_summary = _prepare_user_summary(result["user_summary"], match_results)
+    # 탈퇴자도 계산하고 summary를 유지한다. 노출할 때 guild_member.status로 거른다.
+    position_summary = build_user_position_report(match_results)
+    user_summary = attach_position_report(user_summary, position_summary)
+    _assert_summary_covers_all_players(match_results, user_summary, season)
     # 어느 baseline으로 계산했는지 결과 행마다 남긴다(새 시즌 초반에는 가장 최근 저장된 baseline).
     match_results = match_results.assign(
         season=season,
@@ -243,8 +231,7 @@ def _calculate_season(
         f"Calculated season {season!r}: "
         f"{result['metadata']['match_count']:,} matches, "
         f"{result['metadata']['player_game_row_count']:,} rows, "
-        f"{len(user_summary):,} summary rows "
-        f"({len(all_players) - len(user_summary):,} non-member players excluded)."
+        f"{len(user_summary):,} summary rows."
     )
     return {
         "season": season,
@@ -256,24 +243,20 @@ def _calculate_season(
     }
 
 
-def _assert_active_members_found(match_results, user_summary, season: str) -> None:
-    """현재 길드원 판정이 통째로 실패해 요약을 비운 채 저장하지 않도록 막는다.
-
-    해산 등으로 한 길드의 길드원이 0명일 수는 있으므로 경고만 하고, 시즌 전체
-    요약이 0행이면 길드원 테이블 설정이나 status 판정 오류로 보고 중단한다.
-    """
-    if user_summary.empty:
+def _assert_summary_covers_all_players(match_results, user_summary, season: str) -> None:
+    """summary가 결과 행이 있는 모든 계정(탈퇴자 포함)을 한 행씩 갖는지 확인한다."""
+    expected = match_results[["guild_id", "mmr_player_account"]].drop_duplicates()
+    actual = user_summary[["guild_id", "player_code"]].drop_duplicates()
+    if len(expected) != len(user_summary) or len(actual) != len(user_summary):
         raise RuntimeError(
-            f"Season {season!r} has no current guild members in the summary. "
-            "Check MMR_GUILD_MEMBER_TABLE and guild_member.status before saving."
+            f"Season {season!r}: summary has {len(user_summary):,} rows for "
+            f"{len(expected):,} accounts with results."
         )
-    empty_guilds = sorted(
-        set(match_results["guild_id"].astype(str)) - set(user_summary["guild_id"].astype(str))
-    )
-    if empty_guilds:
-        print(
-            f"WARNING: season {season!r} guilds with no current members in summary: "
-            f"{empty_guilds}"
+    # 결과가 있는 계정은 리포트도 있어야 한다. 키가 어긋나면 left join이 조용히 {}를 남긴다.
+    empty_reports = int((~user_summary["position_report"].map(bool)).sum())
+    if empty_reports:
+        raise RuntimeError(
+            f"Season {season!r}: {empty_reports:,} summary rows have an empty position_report."
         )
 
 

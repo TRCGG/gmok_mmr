@@ -49,16 +49,17 @@ def _stamp(df: pd.DataFrame) -> pd.DataFrame:
     # JSON 컬럼(예: position_report) 안의 실수도 고정 컬럼과 같은 자릿수로 맞춘다.
     for column in out.select_dtypes(include="object").columns:
         if out[column].map(lambda value: isinstance(value, dict)).any():
-            out[column] = out[column].map(_round_nested)
+            out[column] = out[column].map(round_nested_floats)
     out["calculated_at"] = datetime.now(UTC)
     return out
 
 
-def _round_nested(value):
+def round_nested_floats(value):
+    """dict·list 안의 실수를 결과 고정 컬럼과 같은 소수 둘째 자리로 반올림한다."""
     if isinstance(value, dict):
-        return {key: _round_nested(item) for key, item in value.items()}
+        return {key: round_nested_floats(item) for key, item in value.items()}
     if isinstance(value, list):
-        return [_round_nested(item) for item in value]
+        return [round_nested_floats(item) for item in value]
     if isinstance(value, float):
         return round(value, 2)
     return value

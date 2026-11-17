@@ -99,7 +99,6 @@ DB_PASSWORD=changeme
 
 MMR_PLAYER_GAME_TABLE=player_game
 MMR_PLAYER_TABLE=player
-MMR_GUILD_MEMBER_TABLE=guild_member
 
 MMR_MATCH_RESULT_TABLE=mmr_match_results
 MMR_SUMMARY_TABLE=mmr_user_summary
@@ -117,8 +116,9 @@ DB 입력은 `player_game`과 `riot_account`의 `player_code`를 사용합니다
 MMR은 부캐 매핑을 보지 않습니다. 부캐도 실제 계정 기준으로 별도 MMR을 가지며,
 `scripts/run_mmr_once.py` DB 배치는 `mmr_player_account`와 사용자 요약의
 `player_code`에 항상 실제 참가 계정의 `player_code`를 넣습니다(부캐 노출 여부는
-조회 단계에서 처리). `guild_member`는 현재 길드원(`status = '1'`) 판정에만 쓰며,
-사용자 요약에는 현재 길드원 계정만 저장합니다. 적용 전
+조회 단계에서 처리). 탈퇴자도 계산하며, 사용자 요약에는 결과 행이 있는 모든 계정을
+저장합니다(노출할 때 `guild_member.status`로 거름). 대상은 일반내전(`game_type = '1'`)뿐입니다.
+적용 전
 `migrations/005_add_mmr_player_account.sql`을 실행해야 합니다. 배치를 재실행하면
 계산 대상 길드·시즌의 경기 결과와 사용자 요약을 한 트랜잭션에서 교체합니다.
 
@@ -139,16 +139,18 @@ psql -d <DB_NAME> -f migrations/001_create_mmr_result_tables.sql
 psql -d <DB_NAME> -f migrations/003_alter_tables.sql
 psql -d <DB_NAME> -f migrations/004_rename_summary_position_columns.sql
 psql -d <DB_NAME> -f migrations/005_add_mmr_player_account.sql
-psql -d <DB_NAME> -f migrations/006_add_position_report.sql
-psql -d <DB_NAME> -f migrations/007_add_result_unique_keys.sql
-psql -d <DB_NAME> -f migrations/008_add_season.sql
-psql -d <DB_NAME> -f migrations/009_add_result_baseline.sql
+psql -d <DB_NAME> -f migrations/006_mmr_report_season_baseline.sql
 ```
 
-- 006: 유저 요약에 포지션별 지표·스타일 JSON(`position_report`) 추가
-- 007: 결과 `(guild_id, replay_code, player_code)`, 요약 `(guild_id, player_code)` 고유 인덱스
-- 008: 결과·요약에 `season` 추가, 요약 고유 키를 `(guild_id, player_code, season)`으로 교체
-- 009: 결과에 계산에 쓴 `baseline_season`, `baseline_version` 기록
+- 006: 한 파일로 아래를 모두 적용합니다(이전 006~009를 합침, 다시 실행해도 안전).
+  - 유저 요약에 포지션별 지표·스타일 JSON(`position_report`) 추가
+  - 결과 고유 키 `(guild_id, replay_code, player_code)`
+  - 결과·요약에 `season` 추가(`custom_match.season`), 요약 고유 키 `(guild_id, player_code, season)`
+  - 결과에 계산에 쓴 `baseline_season`, `baseline_version` 기록
+  - 스키마만 바꾸고 기존 데이터는 고치지 않습니다. `mmr_match_results`·`mmr_user_summary`를
+    비운 뒤(과거 기록 1회 계산 전) 실행합니다. 데이터가 남아 있으면 `season NOT NULL`에서
+    실패하고 전체가 롤백됩니다. 이전 006~008이 적용된 DB에서는 `baseline_*` 컬럼만 추가됩니다.
+  - DBeaver는 "스크립트 실행"으로, psql은 `-v ON_ERROR_STOP=1`을 붙여 실행합니다.
 
 현재 결과 저장 테이블은 계산 결과 중심 컬럼만 저장합니다. DB 조회 단계에서는 원본 notebook 기준 Game Impact metric을 맞추기 위해 더 많은 raw/derived 컬럼을 사용하지만, 저장 시에는 실제 결과 테이블에 존재하는 컬럼만 저장됩니다.
 
@@ -172,7 +174,9 @@ python tests/cli/calculate_full_mmr_with_db_baseline.py --season 2026
 ### baseline 계산 (로컬 수동 실행)
 
 baseline은 MMR 계산과 분리해 `scripts/calculate_baseline.py`로 시즌마다 만들고 DB
-(`mmr_baselines`)에 저장합니다. 전체 길드의 해당 시즌 경기(`custom_match.season`)를 쓰며,
+(`mmr_baselines`)에 저장합니다. 전체 길드의 해당 시즌 일반내전(`game_type = '1'`) 경기
+(`custom_match.season`)를 써서 MMR 계산 대상과 같은 모집단으로 만듭니다. 일반내전 필터 이전에
+만든 baseline은 다시 만들어야 합니다.
 5v5 검증을 통과한 경기가 **200판 미만**이거나 baseline이 퇴화하면 저장하지 않고
 중단합니다. 같은 `(season, baseline_version)`이 이미 있으면 덮어쓰지 않고 중단하므로 새
 버전을 지정합니다. 저장하면 같은 시즌의 이전 baseline은 비활성화되고, `metadata.scope =
@@ -192,7 +196,7 @@ baseline**으로 계산하고, 200판이 쌓여 새 baseline을 저장하면 이
 
 ### 과거 기록 전체 계산
 
-과거 기록 전체 계산은 아래 배치로 한 번 실행합니다. 006~009 migration과 시즌 baseline이
+과거 기록 전체 계산은 아래 배치로 한 번 실행합니다. 006 migration과 시즌 baseline이
 먼저 있어야 합니다. 배치는 baseline을 만들지 않고, 시즌마다 그 시즌의 활성 baseline
 (없으면 가장 최근에 저장된 활성 baseline)을 읽어 계산합니다. 200판 미만이거나
 `scripts/calculate_baseline.py`로 만들지 않은(`metadata.scope` 표식이 없는) baseline은 쓰지
@@ -208,6 +212,23 @@ baseline**으로 계산하고, 200판이 쌓여 새 baseline을 저장하면 이
 ```bash
 MMR_ALLOW_RECALCULATE=1 python scripts/run_mmr_once.py
 ```
+
+정수 MMR 값(`mmr_change`, `total_mmr`)은 .5에서 0에서 먼 쪽으로 반올림합니다(-12.5 → -13,
+1306.5 → 1307). 실수 컬럼과 승률은 pandas `.round(2)`(짝수 쪽)를 유지합니다.
+
+### position_report
+
+`position_report`(포지션별 지표 평균·플레이 스타일)는 과거 기록 1회 계산(`run_mmr_once.py`)이
+summary와 함께 채웁니다. 서비스 시작 뒤에는 백엔드 배치가 같은 규칙(`src/mmr/gold/report.py`)으로
+다시 계산합니다. 백분위는 같은 길드·포지션 비교군 전체에 따라 달라지므로 길드·시즌 단위로 통째로
+다시 계산합니다.
+
+### 백엔드 TS 이식 대조
+
+별도 fixture 파일은 두지 않습니다. 과거 기록 1회 계산 결과(`mmr_match_results`,
+`mmr_user_summary`)를 정답지로 씁니다. 백엔드는 경기마다 그 경기보다 앞선 결과 행으로 10명의 직전
+상태를 만들고, 결과 행에 기록된 baseline으로 TS 계산을 돌려 저장된 값과 비교합니다.
+`position_report`는 길드·시즌 단위로 비교합니다.
 
 ## 테스트
 

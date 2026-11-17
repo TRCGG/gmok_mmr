@@ -219,3 +219,73 @@ def test_incremental_state_keeps_same_player_separate_by_guild():
 
     assert state.get_pos_mmr(("guild-a", "alice"), "TOP") == 1700
     assert state.get_pos_mmr(("guild-b", "alice"), "TOP") == 1300
+
+
+# ---------------------------------------------------------------------------
+# 정수 반올림: .5에서 0에서 먼 쪽 (백엔드·Postgres numeric ROUND와 동일)
+# ---------------------------------------------------------------------------
+
+def test_round_half_away_from_zero_ties():
+    from fractions import Fraction
+
+    from mmr.gold.mmr import round_half_away_from_zero
+
+    assert round_half_away_from_zero(-12.5) == -13  # Python round()는 -12
+    assert round_half_away_from_zero(-22.5) == -23  # Python round()는 -22
+    assert round_half_away_from_zero(12.5) == 13  # Python round()는 12
+    assert round_half_away_from_zero(Fraction(2613, 2)) == 1307  # 1306.5
+    assert round_half_away_from_zero(-12.4) == -12
+    assert round_half_away_from_zero(-12.6) == -13
+    assert round_half_away_from_zero(12.499999999999998) == 12
+
+
+def test_total_mmr_weighted_average_tie_rounds_away_from_zero():
+    from mmr.gold.mmr import MMRRuntimeState
+
+    state = MMRRuntimeState()
+    player = ("g", "p")
+    state.player_pos_mmr[player] = {"TOP": 1312, "MID": 1301}
+    state.player_pos_record[player] = {
+        "TOP": {"win": 1, "total": 1},
+        "MID": {"win": 0, "total": 1},
+    }
+
+    # (1312 + 1301) / 2 = 1306.5 → 1307 (Python round()는 1306)
+    assert state.calculate_total_mmr(player) == 1307
+
+
+def test_negative_delta_tie_rounds_away_from_zero():
+    # 패자 f1 = 1.9655560456566725이면 f1 ** 0.6 == 1.5 (float 정확값)이고,
+    # f2 = 1, 기대 승률 0.5(같은 MMR), k = 1이라 delta = -15 * 1.5 = -22.5(정확한 동률)이다.
+    # 짝수 쪽 반올림이면 -22, 0에서 먼 쪽이면 -23.
+    from mmr.gold.mmr import MMRBaselineStats, MMRRuntimeState, update_single_match_mmr
+
+    loser_f1 = 1.9655560456566725
+    assert loser_f1 ** 0.6 == 1.5
+    positions = ("TOP", "JUG", "MID", "ADC", "SUP")
+    rows = []
+    for position in positions:
+        for result in (1, 0):
+            rows.append({
+                "played_at": pd.Timestamp("2026-01-01"),
+                "replay_code": "tie",
+                "guild_id": "g",
+                "player_code": f"{position}-{result}",
+                "position": position,
+                "game_result": result,
+                "game_impact_vs_opponent": 50.0,
+                "game_n_person_contribution": 1.0 if result else loser_f1,
+            })
+    baseline = MMRBaselineStats(
+        f1_mean=1.0,
+        f2_mean=50.0,
+        f1_position_mean={pos: 1.0 for pos in positions},
+        f2_position_mean={pos: 50.0 for pos in positions},
+    )
+
+    out = update_single_match_mmr(pd.DataFrame(rows), state=MMRRuntimeState(), baseline=baseline)
+
+    losers = out[out["game_result"].eq(0)]
+    assert losers["final_factor"].eq(1.5).all()
+    assert losers["mmr_change"].eq(-23).all()  # Python round(-22.5)는 -22
+    assert out[out["game_result"].eq(1)]["mmr_change"].eq(20).all()

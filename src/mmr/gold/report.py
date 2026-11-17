@@ -128,54 +128,14 @@ def build_user_position_report(
     ).reset_index(drop=True)
 
 
-def filter_active_guild_members(
-    position_summary: pd.DataFrame, guild_members: pd.DataFrame
-) -> pd.DataFrame:
-    """현재 길드원(status = '1')인 실제 계정만 남긴다. 부캐도 자기 계정으로 판정한다.
+def build_position_report_records(position_summary: pd.DataFrame) -> pd.DataFrame:
+    """유저·포지션 리포트를 유저당 한 행의 ``position_report`` JSON 호환 객체로 묶는다.
 
-    DB 타입 차이(CHAR 패딩, 정수·NULL로 인한 ``1.0``)와 앞뒤 공백에 흔들리지 않도록
-    키와 상태를 문자열로 정규화해 비교한다.
-    """
-    _require_columns(position_summary, {"guild_id", "player_code"})
-    _require_columns(guild_members, {"guild_id", "account", "status"})
-    status = _text(guild_members["status"])
-    is_active = (
-        status.eq("1").fillna(False)
-        | pd.to_numeric(status, errors="coerce").eq(1).fillna(False)
-    ).astype(bool)
-    active = guild_members.loc[is_active]
-    active_keys = pd.DataFrame({
-        "_guild_key": _text(active["guild_id"]),
-        "_account_key": _text(active["account"]),
-    }).dropna().drop_duplicates()
-    keyed = position_summary.assign(
-        _guild_key=_text(position_summary["guild_id"]),
-        _account_key=_text(position_summary["player_code"]),
-    )
-    return keyed.merge(
-        active_keys,
-        on=["_guild_key", "_account_key"],
-        how="inner",
-        validate="many_to_one",
-    ).drop(columns=["_guild_key", "_account_key"])
-
-
-def _text(series: pd.Series) -> pd.Series:
-    return series.astype("string").str.strip()
-
-
-def attach_position_report(
-    user_summary: pd.DataFrame, position_summary: pd.DataFrame
-) -> pd.DataFrame:
-    """활성 유저 요약에 포지션별 리포트를 JSON 호환 객체로 합친다.
-
-    ``position_summary``는 활성 길드원 필터가 적용된 결과여야 한다. 따라서
-    inner join을 사용해 탈퇴 유저를 최종 요약 저장 대상에서도 제외한다.
     포지션 MMR·판수·승률은 요약의 ``{pos}_mmr/_games/_winrate`` 컬럼에만 두고
-    JSON에는 지표와 스타일만 담는다.
+    JSON에는 지표와 스타일만 담는다. 반환 컬럼은 ``guild_id, player_code,
+    position_report``다.
     """
     keys = ["guild_id", "player_code"]
-    _require_columns(user_summary, set(keys))
     _require_columns(position_summary, {*keys, "position"})
 
     payload_columns = [
@@ -195,14 +155,28 @@ def attach_position_report(
             "player_code": key_values[1],
             "position_report": position_report,
         })
+    return pd.DataFrame(reports, columns=[*keys, "position_report"])
 
-    report_frame = pd.DataFrame(reports, columns=[*keys, "position_report"])
-    return user_summary.merge(
-        report_frame,
+
+def attach_position_report(
+    user_summary: pd.DataFrame, position_summary: pd.DataFrame
+) -> pd.DataFrame:
+    """유저 요약에 포지션별 리포트(``build_position_report_records``)를 합친다.
+
+    요약 행은 하나도 빼지 않는다(탈퇴자 포함). 리포트가 없는 계정은 ``{}``가 된다.
+    """
+    keys = ["guild_id", "player_code"]
+    _require_columns(user_summary, set(keys))
+    merged = user_summary.merge(
+        build_position_report_records(position_summary),
         on=keys,
-        how="inner",
+        how="left",
         validate="one_to_one",
     )
+    merged["position_report"] = merged["position_report"].map(
+        lambda value: value if isinstance(value, dict) else {}
+    )
+    return merged
 
 
 def _account_series(frame: pd.DataFrame) -> pd.Series:
