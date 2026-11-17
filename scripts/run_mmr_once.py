@@ -94,9 +94,6 @@ def main() -> None:
     # 5v5 검증 전 범위로 잡아, 경기가 전부 빠진 길드·시즌의 예전 행도 교체한다.
     replace_scopes = raw_df[["guild_id", "season"]].drop_duplicates().reset_index(drop=True)
 
-    # MMR은 부캐 매핑을 보지 않는다. 부캐도 실제 계정(player_code)으로 별도 MMR을 갖는다.
-    raw_df = raw_df.assign(mmr_player_account=raw_df["player_code"])
-
     _assert_result_tables_ready()
     _assert_baseline_table_ready()
     _assert_recalculation_allowed(replace_scopes)
@@ -245,7 +242,7 @@ def _calculate_season(
 
 def _assert_summary_covers_all_players(match_results, user_summary, season: str) -> None:
     """summary가 결과 행이 있는 모든 계정(탈퇴자 포함)을 한 행씩 갖는지 확인한다."""
-    expected = match_results[["guild_id", "mmr_player_account"]].drop_duplicates()
+    expected = match_results[["guild_id", "player_code"]].drop_duplicates()
     actual = user_summary[["guild_id", "player_code"]].drop_duplicates()
     if len(expected) != len(user_summary) or len(actual) != len(user_summary):
         raise RuntimeError(
@@ -268,15 +265,6 @@ def _prepare_match_results(rows: list[dict[str, Any]], guild_id: str | None):
         raise RuntimeError("Calculated matches contain missing guild_id values.")
     if guild_id is not None and not out["guild_id"].eq(guild_id).all():
         raise RuntimeError("Calculated matches contain a different guild_id than requested.")
-    # MMR은 부캐 매핑을 보지 않으므로 귀속 계정은 항상 실제 참가 계정과 같아야 한다.
-    if "mmr_player_account" in out.columns:
-        mismatched = out[out["mmr_player_account"].ne(out["player_code"])]
-        if not mismatched.empty:
-            sample = mismatched[["guild_id", "replay_code", "player_code", "mmr_player_account"]]
-            raise RuntimeError(
-                "mmr_player_account must equal player_code (no alt-account mapping). "
-                f"Sample: {sample.head().to_dict('records')}"
-            )
     return out
 
 
@@ -286,10 +274,7 @@ def _prepare_user_summary(rows: list[dict[str, Any]], match_results):
     out = pd.DataFrame(rows)
     if out[["guild_id", "player_code"]].isna().any().any():
         raise RuntimeError("Calculated summaries require guild_id and player_code.")
-    key_column = "mmr_player_account" if "mmr_player_account" in match_results else "player_code"
-    valid_keys = match_results[["guild_id", key_column]].drop_duplicates().rename(
-        columns={key_column: "player_code"}
-    )
+    valid_keys = match_results[["guild_id", "player_code"]].drop_duplicates()
     checked = out.merge(
         valid_keys,
         on=["guild_id", "player_code"],
@@ -393,11 +378,13 @@ def _assert_result_tables_ready() -> None:
     engine = create_engine(get_db_url())
     required = {
         get_mmr_match_result_table(): {
-            "replay_code", "player_code", "mmr_player_account", "guild_id", "season",
+            "replay_code", "player_code", "guild_id", "season",
             "baseline_season", "baseline_version",
         },
         get_mmr_summary_table(): {"player_code", "guild_id", "season", "position_report"},
     }
+    # 006에서 지운 컬럼이 남아 있으면 006을 다시 적용해야 한다. 그대로 저장하면 NULL이 쌓인다.
+    removed = {get_mmr_match_result_table(): {"mmr_player_account"}}
     with engine.connect() as conn:
         inspector = inspect(conn)
         for table_name, required_columns in required.items():
@@ -410,6 +397,12 @@ def _assert_result_tables_ready() -> None:
                 raise RuntimeError(
                     f"Result table {table_name} is missing columns: {missing}. "
                     "Apply the result-table migrations first."
+                )
+            leftover = sorted(removed.get(table_name, set()) & actual_columns)
+            if leftover:
+                raise RuntimeError(
+                    f"Result table {table_name} still has removed columns: {leftover}. "
+                    "Re-apply migrations/006_mmr_report_season_baseline.sql first."
                 )
 
 

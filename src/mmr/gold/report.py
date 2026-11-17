@@ -180,12 +180,11 @@ def attach_position_report(
 
 
 def _account_series(frame: pd.DataFrame) -> pd.Series:
-    column = "mmr_player_account" if "mmr_player_account" in frame else "player_code"
-    if column not in frame:
-        raise ValueError("MMR report input requires player_code or mmr_player_account.")
-    if frame[column].isna().any():
-        raise ValueError(f"MMR report input contains missing {column} values.")
-    return frame[column].astype(str)
+    if "player_code" not in frame:
+        raise ValueError("MMR report input requires player_code.")
+    if frame["player_code"].isna().any():
+        raise ValueError("MMR report input contains missing player_code values.")
+    return frame["player_code"].astype(str)
 
 
 def _percentile(value: object, population: pd.Series) -> float:

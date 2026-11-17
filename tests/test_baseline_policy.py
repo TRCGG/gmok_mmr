@@ -207,10 +207,11 @@ def batch(monkeypatch, tmp_path):
 
     built = _baseline("2026")
     baseline = {**built, "metadata": {**built["metadata"], "match_count": 200}}
+    # 원천에 예전 부캐 귀속 컬럼이 섞여 들어와도 저장 결과에는 남지 않아야 한다.
     raw = pd.concat(
         [_season_rows("2026", games=6), _season_rows("2027", games=1).iloc[:9]],
         ignore_index=True,
-    ).drop(columns=["mmr_player_account"])
+    ).assign(mmr_player_account="stale-main-account")
     saved = {}
     state = {"existing": 0, "baseline": baseline}
 
@@ -235,7 +236,8 @@ def test_main_skips_invalid_season_but_replaces_its_scope(batch):
 
     saved = batch["saved"]
     assert set(saved["matches"]["season"]) == {"2026"}
-    assert (saved["matches"]["mmr_player_account"] == saved["matches"]["player_code"]).all()
+    assert "mmr_player_account" not in saved["matches"].columns
+    assert "stale-main-account" not in set(saved["summary"]["player_code"])
     assert set(saved["matches"]["baseline_season"]) == {"2026"}
     assert sorted(saved["scopes"]["season"]) == ["2026", "2027"]
     report = json.loads(batch["report"].read_text(encoding="utf-8"))
