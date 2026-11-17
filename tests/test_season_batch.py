@@ -27,7 +27,6 @@ def _match(replay_code: str, day: int, season: str, rng: random.Random) -> list[
             rows.append({
                 "replay_code": replay_code,
                 "player_code": player,
-                "mmr_player_account": player,
                 "guild_id": "g",
                 "season": season,
                 "team": team,
@@ -217,7 +216,7 @@ def test_cli_db_save_paths_are_blocked(monkeypatch):
 def test_alt_account_keeps_its_own_mmr_and_summary_row():
     season_df = _season_rows("2026", games=6)
     alt_games = season_df["player_code"].eq("p0") & season_df["replay_code"].isin(["2026-r0", "2026-r1"])
-    season_df.loc[alt_games, ["player_code", "mmr_player_account"]] = "p0-alt"
+    season_df.loc[alt_games, "player_code"] = "p0-alt"
 
     run = _run(season_df, "2026")
     summary = run["user_summary"].set_index("player_code")
@@ -234,17 +233,83 @@ def test_summary_keeps_every_player_with_results():
     # 길드원 판정 없이 결과가 있는 모든 계정(탈퇴자 포함)이 summary 한 행씩을 갖는다.
     run = _run(_season_rows("2026", games=6), "2026")
 
-    accounts = run["match_results"][["guild_id", "mmr_player_account"]].drop_duplicates()
+    accounts = run["match_results"][["guild_id", "player_code"]].drop_duplicates()
     assert len(run["user_summary"]) == len(accounts) == 10
     assert run["user_summary"]["position_report"].map(bool).all()
 
 
-def test_match_results_reject_alt_account_attribution():
-    rows = [{"guild_id": "g", "replay_code": "r1", "player_code": "p0-alt", "mmr_player_account": "p0"}]
+def test_mmr_player_account_is_gone():
+    sql = open(ROOT / "migrations/006_mmr_report_season_baseline.sql", encoding="utf-8").read()
 
-    with pytest.raises(RuntimeError, match="must equal player_code"):
-        run_mmr_once._prepare_match_results(rows, guild_id=None)
+    # 계정 키는 player_code 하나다. 006이 005의 mmr_player_account를 지운다.
+    assert "ALTER TABLE mmr_match_results DROP COLUMN IF EXISTS mmr_player_account;" in sql
+    assert "ON mmr_match_results (guild_id, player_code, position, played_at)" in sql
+    assert sql.index("DROP COLUMN IF EXISTS mmr_player_account") < sql.index(
+        "idx_mmr_match_results_history_lookup\n"
+    )
+    # 계산·리포트·저장 코드는 이 컬럼을 쓰지 않는다(입력 정리와 남은 컬럼 검사만 이름을 쓴다).
+    for path in ("src/mmr/gold/mmr.py", "src/mmr/gold/report.py", "tests/harness/db_test/repository.py"):
+        assert "mmr_player_account" not in (ROOT / path).read_text(encoding="utf-8"), path
 
+
+def test_stale_account_column_in_input_is_ignored_and_keyed_by_player_code():
+    # 예전 입력처럼 mmr_player_account가 player_code와 다른 값으로 들어와도 계정 키는 player_code다.
+    season_df = _season_rows("2026", games=6).assign(mmr_player_account="someone-else")
+
+    run = _run(season_df, "2026")
+
+    assert "mmr_player_account" not in run["match_results"].columns
+    assert sorted(run["user_summary"]["player_code"]) == [f"p{i}" for i in range(10)]
+
+
+def test_single_match_state_is_keyed_by_player_code():
+    from mmr.serving.service import calculate_single_match_mmr
+
+    baseline = _baseline("2026")
+    rows = _season_rows("2026", games=1).assign(mmr_player_account="someone-else")
+    rows["played_at"] = rows["played_at"].astype(str)
+
+    result = calculate_single_match_mmr({
+        "guild_id": "g",
+        "season": "2026",
+        "baseline_version": baseline["baseline_version"],
+        "match_rows": rows.to_dict(orient="records"),
+        "current_user_state": [],
+        "baseline_stats": baseline["mmr_baseline"],
+        "game_impact_baseline": baseline["game_impact_baseline"],
+    })
+
+    assert {row["player_code"] for row in result["updated_user_summary"]} == {f"p{i}" for i in range(10)}
+    assert all("mmr_player_account" not in row for row in result["match_results"])
+
+
+def test_batch_stops_when_removed_account_column_is_still_present(monkeypatch):
+    class _Inspector:
+        def has_table(self, name):
+            return True
+
+        def get_columns(self, name):
+            columns = {"replay_code", "player_code", "guild_id", "season", "baseline_season",
+                       "baseline_version", "position_report", "mmr_player_account"}
+            return [{"name": column} for column in columns]
+
+    class _Conn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    class _Engine:
+        def connect(self):
+            return _Conn()
+
+    monkeypatch.setattr(run_mmr_once, "create_engine", lambda url: _Engine())
+    monkeypatch.setattr(run_mmr_once, "get_db_url", lambda: "fake://")
+    monkeypatch.setattr(run_mmr_once, "inspect", lambda conn: _Inspector())
+
+    with pytest.raises(RuntimeError, match="Re-apply migrations/006"):
+        run_mmr_once._assert_result_tables_ready()
 
 def test_results_record_the_baseline_used():
     own = _run(_season_rows("2026", games=6), "2026")

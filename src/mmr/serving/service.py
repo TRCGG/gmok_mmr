@@ -188,7 +188,8 @@ def build_incremental_feature_dataframe(
 
 
 def _normalize_source_columns(df: pd.DataFrame) -> pd.DataFrame:
-    out = df.copy()
+    # 계정 키는 player_code 하나다. 예전 입력의 부캐 귀속 컬럼은 계산·응답에 섞이지 않게 버린다.
+    out = df.drop(columns=["mmr_player_account"], errors="ignore")
     if "gold" not in out.columns and "gold_earned" in out.columns:
         out = out.rename(columns={"gold_earned": "gold"})
     if "game_result" not in out.columns and "win" in out.columns:

@@ -23,7 +23,6 @@ def _report_rows(user_count: int = 5, games: int = 20) -> pd.DataFrame:
                 {
                     "guild_id": "guild-1",
                     "player_code": f"player-{user_index}",
-                    "mmr_player_account": f"player-{user_index}",
                     "position": "TOP",
                     "replay_code": f"game-{user_index}-{game_index}",
                     "played_at": start + timedelta(days=game_index),
