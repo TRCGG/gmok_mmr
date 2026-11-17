@@ -15,6 +15,7 @@ from .mmr import (
     MMRRuntimeState,
     MMRSettings,
     make_summary_df_wide,
+    round_half_away_from_zero,
     update_mmr_elo,
     update_mmr_matches,
     update_single_match_mmr,
@@ -34,11 +35,20 @@ __all__ = [
     "MMRRuntimeState",
     "MMRSettings",
     "make_summary_df_wide",
+    "round_half_away_from_zero",
     "update_mmr_elo",
     "update_mmr_matches",
     "update_single_match_mmr",
     "validate_mmr_input_matches",
 ]
-from .report import attach_position_report, build_user_position_report, filter_active_guild_members
+from .report import (
+    attach_position_report,
+    build_position_report_records,
+    build_user_position_report,
+)
 
-__all__ += ["attach_position_report", "build_user_position_report", "filter_active_guild_members"]
+__all__ += [
+    "attach_position_report",
+    "build_position_report_records",
+    "build_user_position_report",
+]

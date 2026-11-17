@@ -43,6 +43,7 @@ from .gold import (
     ServiceBaseline,
     calculate_service_baseline,
     make_summary_df_wide,
+    round_half_away_from_zero,
     service_baseline_to_payload,
     update_mmr_elo,
     update_mmr_matches,
@@ -89,6 +90,7 @@ __all__ = [
     "update_mmr_matches",
     "update_single_match_mmr",
     "make_summary_df_wide",
+    "round_half_away_from_zero",
     "validate_mmr_input_matches",
     # serving
     "calculate_baseline_payload",

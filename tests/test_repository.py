@@ -119,3 +119,10 @@ def test_raw_match_sql_reads_season_from_custom_match():
 
     assert "cm.season                                      AS season" in repository_source
     assert "LEFT JOIN custom_match cm ON cm.id = pg.custom_match_id" in repository_source
+
+
+def test_raw_match_sql_reads_only_regular_custom_games():
+    repository_source = inspect.getsource(repository)
+
+    # 일반내전(game_type 1)만 1회 계산 대상이다. 스크림·대회는 제외한다.
+    assert "\"pg.game_type = '1'\"" in repository_source

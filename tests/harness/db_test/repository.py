@@ -12,7 +12,6 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 from .config import (
     get_db_url,
-    get_guild_member_table,
     get_mmr_match_result_table,
     get_mmr_summary_table,
     get_player_game_table,
@@ -29,7 +28,8 @@ def load_match_dataframe_from_db(guild_id: str | None = None) -> pd.DataFrame:
     Args:
         guild_id: 지정 시 해당 guild의 경기만 읽는다. None이면 전체.
 
-    NOTE: ``is_deleted = false`` 와 ``is_mmr_eligible = true`` 행만 읽는다.
+    NOTE: ``is_deleted = false``, ``is_mmr_eligible = true``, 일반내전(``game_type = '1'``)
+    행만 읽는다. 서비스 시작 뒤 백엔드 배치도 일반내전만 계산하므로 기준을 맞춘다.
     시즌은 계산 시점 값이 아니라 경기의 ``custom_match.season``을 읽는다.
 
     MMR 식별자는 player_code이며 길드별로 계산한다. player_game의
@@ -38,7 +38,7 @@ def load_match_dataframe_from_db(guild_id: str | None = None) -> pd.DataFrame:
     """
     engine = create_engine(get_db_url())
     player_game_table = get_player_game_table()
-    conditions = ["pg.is_deleted = false", "pg.is_mmr_eligible = true"]
+    conditions = ["pg.is_deleted = false", "pg.is_mmr_eligible = true", "pg.game_type = '1'"]
     if guild_id is not None:
         conditions.append("pg.guild_id = :guild_id")
     where_clause = "WHERE " + " AND ".join(conditions)
@@ -133,19 +133,6 @@ def load_user_name_dataframe_from_db() -> pd.DataFrame:
 
     with engine.connect() as conn:
         return pd.read_sql(query, conn).drop_duplicates(subset=["puuid"])
-
-
-def load_guild_members_for_mmr(guild_id: str | None = None) -> pd.DataFrame:
-    """길드원 계정과 활동 상태를 일괄 조회한다(현재 길드원 판정용)."""
-    table_name = get_guild_member_table()
-    query = text(
-        f"SELECT guild_id, account, status FROM {table_name} "
-        "WHERE is_deleted = false"
-        + (" AND guild_id = :guild_id" if guild_id is not None else "")
-    )
-    engine = create_engine(get_db_url())
-    with engine.connect() as conn:
-        return pd.read_sql(query, conn, params={"guild_id": guild_id} if guild_id is not None else {})
 
 
 def save_mmr_results_to_db(
@@ -248,7 +235,7 @@ def _delete_existing_season_scope(scopes: pd.DataFrame, conn, table_name: str) -
     """전체 재계산 대상 길드·시즌의 이전 결과를 제거한다.
 
     전체 계산은 길드·시즌의 모든 경기를 처음부터 다시 계산하므로, 이번 계산에서 빠진
-    경기(원천 삭제·5v5 검증 탈락)의 예전 결과와 탈퇴 유저 요약도 함께 정리한다.
+    경기(원천 삭제·5v5 검증 탈락)의 예전 결과와 그 계정의 요약도 함께 정리한다.
     계산하지 않은 시즌의 결과는 건드리지 않는다.
     """
     if scopes.empty:

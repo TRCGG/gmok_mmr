@@ -12,7 +12,7 @@ from sqlalchemy import create_engine, text
 from harness.db_test import baseline_repository
 from mmr.gold.baseline import validate_baseline_payload
 from scripts import run_mmr_once
-from test_season_batch import _members, _season_rows
+from test_season_batch import _season_rows
 
 POSITIONS = ("TOP", "JUG", "MID", "ADC", "SUP")
 
@@ -218,7 +218,6 @@ def batch(monkeypatch, tmp_path):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("MMR_OUTPUT_FILE", str(tmp_path / "report.json"))
     monkeypatch.setattr(run_mmr_once, "load_match_dataframe_from_db", lambda guild_id: raw.copy())
-    monkeypatch.setattr(run_mmr_once, "load_guild_members_for_mmr", lambda guild_id: _members())
     monkeypatch.setattr(run_mmr_once, "_assert_result_tables_ready", lambda: None)
     monkeypatch.setattr(run_mmr_once, "_assert_baseline_table_ready", lambda: None)
     monkeypatch.setattr(run_mmr_once, "count_existing_results", lambda scopes: state["existing"])

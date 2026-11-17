@@ -62,13 +62,6 @@ def _season_rows(season: str, games: int, start_day: int = 0) -> pd.DataFrame:
     ])
 
 
-def _members() -> pd.DataFrame:
-    return pd.DataFrame([
-        {"guild_id": "g", "account": f"p{i}", "status": "1"}
-        for i in range(10)
-    ])
-
-
 def _baseline(season: str, games: int = 6) -> dict:
     # 합성 데이터는 경기 수가 적으므로 최소 경기 수만 낮춰 실제 계산 경로로 만든다.
     return build_season_baseline(
@@ -79,14 +72,13 @@ def _baseline(season: str, games: int = 6) -> dict:
     )
 
 
-def _run(season_df: pd.DataFrame, season: str, baseline: dict | None = None, members=None):
+def _run(season_df: pd.DataFrame, season: str, baseline: dict | None = None):
     return _calculate_season(
         season_df,
         season=season,
         baseline_payload=baseline or _baseline(season),
         guild_id=None,
         calculation_id="test",
-        members=_members() if members is None else members,
     )
 
 
@@ -197,12 +189,22 @@ def test_replace_scopes_keep_target_scope_without_results():
     ]
 
 
-def test_unique_key_migration_skips_summary_dedupe_after_season_exists():
-    sql = open(ROOT / "migrations/007_add_result_unique_keys.sql", encoding="utf-8").read()
-    guard = sql.index("column_name = 'season'")
+def test_merged_migration_changes_schema_only():
+    sql = open(ROOT / "migrations/006_mmr_report_season_baseline.sql", encoding="utf-8").read()
+    statements = [
+        line.strip().upper() for line in sql.splitlines()
+        if line.strip() and not line.strip().startswith("--")
+    ]
 
-    assert guard < sql.index("DELETE FROM mmr_user_summary")
-    assert guard < sql.index("ON mmr_user_summary (guild_id, player_code)")
+    # 기존 데이터를 고치지 않는다(테이블을 비운 뒤 1회 계산 전에 적용한다).
+    for keyword in ("DELETE ", "UPDATE ", "INSERT ", "DO $$", "TRUNCATE"):
+        assert not any(statement.startswith(keyword) for statement in statements), keyword
+    # 다시 실행해도 안전한 형태만 쓴다.
+    for line in statements:
+        if line.startswith(("CREATE ", "DROP ")):
+            assert "IF NOT EXISTS" in line or "IF EXISTS" in line, line
+        if "ADD COLUMN" in line:
+            assert "ADD COLUMN IF NOT EXISTS" in line, line
 
 
 def test_cli_db_save_paths_are_blocked(monkeypatch):
@@ -216,12 +218,8 @@ def test_alt_account_keeps_its_own_mmr_and_summary_row():
     season_df = _season_rows("2026", games=6)
     alt_games = season_df["player_code"].eq("p0") & season_df["replay_code"].isin(["2026-r0", "2026-r1"])
     season_df.loc[alt_games, ["player_code", "mmr_player_account"]] = "p0-alt"
-    members = pd.concat(
-        [_members(), pd.DataFrame([{"guild_id": "g", "account": "p0-alt", "status": "1"}])],
-        ignore_index=True,
-    )
 
-    run = _run(season_df, "2026", members=members)
+    run = _run(season_df, "2026")
     summary = run["user_summary"].set_index("player_code")
     matches = run["match_results"]
 
@@ -232,11 +230,13 @@ def test_alt_account_keeps_its_own_mmr_and_summary_row():
     assert first_main_game["pre_game_pos_mmr"] == 1300
 
 
-def test_season_with_no_current_members_stops_before_saving():
-    nobody = pd.DataFrame({"guild_id": ["g"], "account": ["someone-else"], "status": ["1"]})
+def test_summary_keeps_every_player_with_results():
+    # 길드원 판정 없이 결과가 있는 모든 계정(탈퇴자 포함)이 summary 한 행씩을 갖는다.
+    run = _run(_season_rows("2026", games=6), "2026")
 
-    with pytest.raises(RuntimeError, match="no current guild members"):
-        _run(_season_rows("2026", games=6), "2026", members=nobody)
+    accounts = run["match_results"][["guild_id", "mmr_player_account"]].drop_duplicates()
+    assert len(run["user_summary"]) == len(accounts) == 10
+    assert run["user_summary"]["position_report"].map(bool).all()
 
 
 def test_match_results_reject_alt_account_attribution():
@@ -258,7 +258,7 @@ def test_results_record_the_baseline_used():
 
 
 def test_result_baseline_migration_adds_columns():
-    sql = open(ROOT / "migrations/009_add_result_baseline.sql", encoding="utf-8").read()
+    sql = open(ROOT / "migrations/006_mmr_report_season_baseline.sql", encoding="utf-8").read()
 
     assert "ADD COLUMN IF NOT EXISTS baseline_season" in sql
     assert "ADD COLUMN IF NOT EXISTS baseline_version" in sql
@@ -280,3 +280,14 @@ def test_batch_game_impact_equals_notebook_season_minmax():
     same_game = matches[matches["replay_code"].eq("2026-r3")].set_index("player_code")
     expected = same_game.loc[single["player_code"], "game_impact"]
     assert np.allclose(single["game_impact"], expected.to_numpy())
+
+
+def test_summary_guard_rejects_missing_rows_and_empty_reports():
+    run = _run(_season_rows("2026", games=6), "2026")
+    matches, summary = run["match_results"], run["user_summary"]
+
+    with pytest.raises(RuntimeError, match="summary has 9 rows for 10 accounts"):
+        run_mmr_once._assert_summary_covers_all_players(matches, summary.iloc[1:], "2026")
+    blank = summary.assign(position_report=[{}] + summary["position_report"].iloc[1:].tolist())
+    with pytest.raises(RuntimeError, match="1 summary rows have an empty position_report"):
+        run_mmr_once._assert_summary_covers_all_players(matches, blank, "2026")
